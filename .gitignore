@@ -1,0 +1,17 @@
+# Local Claude Code settings (machine-specific)
+.claude/settings.local.json
+
+# Secrets / env (mirror docs/SECURITY.md protected list)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+id_rsa*
+.ssh/
+secrets/
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
