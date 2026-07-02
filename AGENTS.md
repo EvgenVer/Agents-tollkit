@@ -167,10 +167,12 @@ create it from the template (`.agents/skills/planning/assets/AGENT_RUNS.template
 only when traceability is needed. One terse block per run (intent, risk class, files,
 validation, outcome). Skip trivial tasks — keep the log high-signal.
 
-## 12. Skills Catalog (router)
-Skill bodies live in `.agents/skills/<name>/SKILL.md`. **This path is not auto-discovered**
-by either tool — when a request matches a trigger below, open and follow that `SKILL.md`
-manually.
+## 12. Skills Catalog (router / index)
+Skill bodies live in `.agents/skills/<name>/SKILL.md` — **auto-discovered natively** by Codex
+and Antigravity; Claude Code reads `.claude/skills/` (the installer generates it). This catalog
+is the tool-independent index and backstop: it lists what exists and when to use it, so skills
+are known even to an agent that only reads `AGENTS.md`, or where native discovery is absent.
+Keep it in sync when you add a skill.
 
 | Skill | Use when |
 |-------|----------|
