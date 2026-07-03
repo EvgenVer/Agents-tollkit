@@ -19,8 +19,15 @@ try {
   } else {
     $Tmp = Join-Path $env:TEMP ("tk_" + [guid]::NewGuid().ToString("N"))
     Write-Host "Fetching toolkit from https://github.com/$REPO ($BRANCH) ..."
-    git clone --depth 1 --branch $BRANCH "https://github.com/$REPO.git" $Tmp 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "clone failed - check REPO/BRANCH and that git is installed." }
+    # git writes progress ("Cloning into ...") to stderr; under $ErrorActionPreference='Stop'
+    # that becomes a terminating NativeCommandError even on a successful clone, and 2>$null
+    # does not prevent it in Windows PowerShell 5.1. Relax EAP for the call, capture both
+    # streams into a variable (silent on success), and gate on the real exit code.
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $cloneLog = git clone --depth 1 --branch $BRANCH "https://github.com/$REPO.git" $Tmp --quiet 2>&1
+    $cloneExit = $LASTEXITCODE
+    $ErrorActionPreference = $eap
+    if ($cloneExit -ne 0) { throw "clone failed ($cloneExit) - check REPO/BRANCH and that git is installed.`n$cloneLog" }
     $Src = $Tmp
   }
 
