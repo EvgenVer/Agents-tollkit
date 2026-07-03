@@ -60,6 +60,8 @@ belong in `AGENTS.md` (with approval), never in lower docs.
 Pick one per request (Stage 0). Each is a behavioral contract:
 - **Architect** — design/plan; no production code; produce SPEC/PLAN/TASKS. (→ `grill`, `planning`)
 - **Builder** — implement an approved plan; match existing style; show diffs.
+- **Orchestrator** — coordinate an approved TASKS.md via executor/reviewer subagents; no
+  direct production edits; **explicit opt-in only** (`/orchestrate`). (→ `orchestration`)
 - **Forensic** — debug; reproduce before fixing; fix only the root cause. (→ `bug-forensics`)
 - **Reviewer** — review only; findings-first, risk-ranked; **no edits unless asked**. (→ `code-review`)
 - **Author** — write docs/prose; no behavior change. (→ `docs-maintenance`)
@@ -189,6 +191,7 @@ Keep it in sync when you add a skill.
 | `dependency-vetting` | Before adding/changing a dependency |
 | `ai-eval-design` | Designing evals for an AI/agentic change |
 | `docs-maintenance` | Updating README/CHANGELOG/user docs |
+| `orchestration` | **Explicit user request only** (`/orchestrate` or explicit phrase): execute approved TASKS.md via executor/reviewer subagents |
 | `security-review` | Secret-scan / dep-vuln / SAST pass on risky changes |
 
 ## 13. Docs Map
