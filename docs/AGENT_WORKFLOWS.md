@@ -146,8 +146,8 @@ workflow above applies unchanged — same gates, same stops.
 
 The main agent becomes a **coordinator** (Orchestrator Mode): it briefs an `executor`
 subagent per approved atomic task, has each result checked by a `reviewer` subagent in a
-fresh context, runs each task's `verify:`, commits per logical block, and updates
-`TASKS.md`. It does not edit production code itself. All gates stay in force: high-risk
+fresh context (budget: **≤2 fix iterations** per task, then escalate or park in Blocked),
+runs each task's `verify:`, commits per logical block, and updates `TASKS.md`. It does not edit production code itself. All gates stay in force: high-risk
 actions → Vibe Diff + STOP even mid-run; unresolved decisions → parked in Blocked.
 
 ### Model tiers
