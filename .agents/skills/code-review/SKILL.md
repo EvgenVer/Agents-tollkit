@@ -8,6 +8,11 @@ description: Review a change (or self-review before done) for correctness, secur
 Checklist and formats live in `docs/CODE_REVIEW.md`. In Reviewer Mode: findings-first,
 risk-ranked, **no edits unless asked**.
 
+**Self-review (Stage 6):** when subagents are available, run this review in a
+**fresh-context subagent** (the `reviewer` agent, if the project ships one) — pass only
+the diff, the checklist, and the relevant SPEC/TASKS; findings-only. Same-context
+self-review tends to confirm its own assumptions. Otherwise review in the current context.
+
 ## Procedure
 1. Load the change (diff) and the relevant SPEC / PLAN / TASKS.
 2. Walk the checklist in `docs/CODE_REVIEW.md` (spec alignment, correctness, security,

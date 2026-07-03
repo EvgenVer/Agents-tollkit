@@ -22,9 +22,13 @@ flowchart TD
     VA -- yes --> E[Stage 4: Implement in small batches, <=3-5 files]
     D -- low / medium --> E
     E --> F[Stage 5: Validate — tests + evals + security + intent]
+    F -- fail --> E
     F --> G[Stage 6: Self-review via code-review]
+    G -- findings --> E
     G --> H[Stage 7: Track + evidence-based final report]
 ```
+
+The two back-edges are bounded, not infinite: see the Stage 5 retry rule below.
 
 ## Execution Modes
 
@@ -54,11 +58,25 @@ now that the plan is approved"). Reviewer never silently turns into Builder.
 - **Stage 4 — Implement.** Small batches (≤3–5 files); don't mix refactor and fix; don't
   weaken tests; placeholders for sensitive values.
 - **Stage 5 — Validate.** `docs/EVALS.md` for AI behavior; tests for deterministic.
-- **Stage 6 — Self-review.** `code-review` skill + `docs/CODE_REVIEW.md`.
+  Iterate until green, but **bounded**: after 2–3 failures of the *same* check, stop
+  tweaking. Reflect — form a hypothesis for why the approach is wrong, re-read SPEC/PLAN;
+  if the problem is at plan level, reopen the planning gate (§6) rather than patching
+  symptoms. Repeated failed attempts pollute the context and degrade further tries.
+- **Stage 6 — Self-review.** `code-review` skill + `docs/CODE_REVIEW.md`. When subagents
+  are available, run the review in a **fresh-context subagent** (the `reviewer` agent, if
+  the project ships one): input is the diff + checklist + relevant SPEC/TASKS,
+  findings-only. A fresh context avoids confirming your own in-context assumptions.
 - **Stage 7 — Track & report.** Update TASKS / MEMORY / NOTES; conditional `AGENT_RUNS.md`;
   evidence-based final report.
 
-## Parallel work and subagents
+## Subagents: context isolation and parallel work
+
+Subagents serve two distinct purposes — isolation first, parallelism second:
+1. **Context isolation** — valid even for sequential work: a fresh-context reviewer
+   (Stage 6), or deep research whose intermediate noise shouldn't pollute the main
+   context. A subagent sees only its brief, so it reasons cleanly — this is the primary
+   value, not "multi-agent intelligence".
+2. **Parallelism** — independent tasks executed concurrently.
 
 Prefer sequential work for small tasks. Parallelize (with subagents, when available) only
 when tasks are independent, clearly scoped, and don't touch the same files or shared

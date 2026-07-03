@@ -16,6 +16,9 @@ Fix causes, not symptoms. No fix lands before the bug is reproduced.
 4. **Fix the root cause only** — smallest change; do not mix in refactors or unrelated fixes.
 5. **Regression test** — keep the now-passing test so the bug cannot silently return.
 6. **Verify** — the repro is gone; nearby behavior is intact.
+7. **Distill** — if the root cause is a reusable lesson (environment quirk, recurring
+   pattern), record it in `MEMORY.md` using the existing entry format
+   (fact · source · date · confidence). Skip one-off trivia — keep MEMORY high-signal.
 
 ## Use when (positive triggers)
 - "This throws / crashes / returns the wrong value …"

@@ -140,6 +140,9 @@ threat model: `docs/SECURITY.md`. Tool/MCP registry (allowed/denied, auth, schem
 
 ## 9. Validation
 - **Tests** for deterministic behavior. Fix failures caused by your changes before moving on.
+- **Bounded retries:** after 2–3 failures of the *same* check, stop tweaking — reflect on
+  why the approach is wrong; if the problem is at plan level, reopen the planning gate (§6)
+  instead of patching symptoms. Detail: `docs/AGENT_WORKFLOWS.md` (Stage 5).
 - **Evals** for AI/agentic behavior (changed prompts, agent instructions, tool-routing,
   retrieval, or model). Don't assume concision is neutral — "just shortening" a prompt can
   change behavior.
@@ -156,7 +159,10 @@ threat model: `docs/SECURITY.md`. Tool/MCP registry (allowed/denied, auth, schem
   UX / security / cost risk?
 
 ## 10. Self-Review & Final Report
-- Self-review via `code-review` before done; risk summary for large changes.
+- Self-review via `code-review` before done; risk summary for large changes. When
+  subagents are available, run the self-review in a **fresh-context subagent** (diff +
+  checklist + relevant SPEC/TASKS only, findings-only); otherwise review in the current
+  context.
 - **Evidence-based final report:** exact commands and their output, changed files,
   dependency changes, residual risks, manual verification steps. State failures plainly.
 
