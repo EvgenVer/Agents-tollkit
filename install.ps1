@@ -33,13 +33,26 @@ try {
       Copy-Item -Recurse -Force $s $d
     }
   }
-  # .claude/commands (Claude Code slash commands, e.g. /grill)
+  # .claude/commands (Claude Code slash commands, e.g. /grill, /orchestrate)
   $sc = Join-Path $Src ".claude\commands"
   if (Test-Path $sc) {
     New-Item -ItemType Directory -Force (Join-Path $Dest ".claude") | Out-Null
     $dc = Join-Path $Dest ".claude\commands"
     if (Test-Path $dc) { Remove-Item -Recurse -Force $dc }
     Copy-Item -Recurse -Force $sc $dc
+  }
+  # Role agents for orchestration (Claude Code + Codex) - copy-if-absent, so a re-install
+  # never overwrites user-tuned `model` values.
+  foreach ($ag in @(".claude\agents",".codex\agents")) {
+    $sa = Join-Path $Src $ag
+    if (Test-Path $sa) {
+      $da = Join-Path $Dest $ag
+      New-Item -ItemType Directory -Force $da | Out-Null
+      Get-ChildItem $sa -File | ForEach-Object {
+        $df = Join-Path $da $_.Name
+        if (-not (Test-Path $df)) { Copy-Item $_.FullName $df }
+      }
+    }
   }
 
   # 2. Generate .claude/skills from .agents/skills (native discovery for Claude Code)

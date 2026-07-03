@@ -14,7 +14,8 @@ vet dependencies, and validate AI behavior with evals — not just tests.
 | `docs/` | Detailed policies: SECURITY, EVALS, TOOLS, CODE_REVIEW, AGENT_WORKFLOWS. |
 | `.agents/skills/<name>/SKILL.md` | On-demand procedures (planning, bug-forensics, code-review, …). |
 | `.agents/skills/planning/assets/` | Templates: SPECIFICATION, PLAN, TASKS, DESCRIPTION, MEMORY, NOTES, AGENT_RUNS, spec.feature. |
-| `.claude/commands/` | Claude Code slash commands (e.g. `/grill`) — Claude-Code-specific; other tools use the natural-language trigger. |
+| `.claude/commands/` | Claude Code slash commands (e.g. `/grill`, `/orchestrate`) — Claude-Code-specific; other tools use the natural-language trigger. |
+| `.claude/agents/`, `.codex/agents/` | Role agents for opt-in orchestration (executor/reviewer) with editable `model` defaults; the installer copies them **only if absent**, so your model tuning survives updates. |
 
 ## Install (one command)
 From your project directory:
@@ -39,10 +40,16 @@ DESCRIPTION yet, grill me on <your idea>, then the planning gate, and stop for a
 (In Claude Code you can also run `/grill`.) From there the agent runs: bootstrap DESCRIPTION →
 planning gate → risk gate → small-batch implement → validate → self-review → report.
 
-*Manual install (no script):* copy `AGENTS.md`, `CLAUDE.md`, `docs/`, `.agents/`, and
-`.claude/commands/` (not the whole `.claude/` — it may hold a machine-specific
-`settings.local.json`); merge the `.gitignore` secrets section; and copy `.agents/skills/` to
-`.claude/skills/` for native Claude Code discovery.
+**Optional — orchestrated execution:** once SPEC/PLAN/TASKS are approved, `/orchestrate`
+(Claude Code; explicit phrase in other tools) runs the tasks autonomously via
+executor/reviewer subagents coordinated by the main agent — with an interactive model
+choice per role at start. Strictly opt-in: without the command the workflow is unchanged.
+Details: `docs/AGENT_WORKFLOWS.md` (Orchestrated execution).
+
+*Manual install (no script):* copy `AGENTS.md`, `CLAUDE.md`, `docs/`, `.agents/`,
+`.claude/commands/`, `.claude/agents/`, and `.codex/agents/` (not the whole `.claude/` —
+it may hold a machine-specific `settings.local.json`); merge the `.gitignore` secrets
+section; and copy `.agents/skills/` to `.claude/skills/` for native Claude Code discovery.
 
 ## How the templates are used
 You don't fill these by hand. The master skeletons live in

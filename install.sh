@@ -14,7 +14,7 @@ DEST="$(pwd)"
 echo "Installing AI-Agent Workflow Toolkit into: $DEST"
 
 TMP=""
-cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; }
+cleanup() { if [ -n "$TMP" ]; then rm -rf "$TMP"; fi; }
 trap cleanup EXIT
 
 if [ -n "${TK_SRC:-}" ]; then
@@ -33,11 +33,23 @@ fi
 for p in AGENTS.md CLAUDE.md README.md docs .agents; do
   if [ -e "$SRC/$p" ]; then rm -rf "${DEST:?}/$p"; cp -R "$SRC/$p" "$DEST/$p"; fi
 done
-# .claude/commands (Claude Code slash commands, e.g. /grill)
+# .claude/commands (Claude Code slash commands, e.g. /grill, /orchestrate)
 if [ -d "$SRC/.claude/commands" ]; then
   mkdir -p "$DEST/.claude"; rm -rf "$DEST/.claude/commands"
   cp -R "$SRC/.claude/commands" "$DEST/.claude/commands"
 fi
+# Role agents for orchestration (Claude Code + Codex) - copy-if-absent, so a re-install
+# never overwrites user-tuned `model` values.
+for ag in .claude/agents .codex/agents; do
+  if [ -d "$SRC/$ag" ]; then
+    mkdir -p "$DEST/$ag"
+    for f in "$SRC/$ag"/*; do
+      [ -e "$f" ] || continue
+      b="$(basename "$f")"
+      [ -e "$DEST/$ag/$b" ] || cp "$f" "$DEST/$ag/$b"
+    done
+  fi
+done
 
 # 2. Generate .claude/skills/ from .agents/skills/ so Claude Code discovers them natively
 #    (Codex & Antigravity already read .agents/skills/ directly).
