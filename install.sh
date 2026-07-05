@@ -30,7 +30,9 @@ fi
 
 # 1. Toolkit files (governance - refreshed on update). Instance docs (DESCRIPTION/SPEC/PLAN/
 #    TASKS/MEMORY/NOTES/AGENT_RUNS) are never in the source, so they are never touched here.
-for p in AGENTS.md CLAUDE.md README.md docs .agents; do
+#    README.md is intentionally NOT copied: it's the toolkit's own adoption doc, and the
+#    consuming project keeps its own README (force-copying it would overwrite theirs).
+for p in AGENTS.md CLAUDE.md docs .agents; do
   if [ -e "$SRC/$p" ]; then rm -rf "${DEST:?}/$p"; cp -R "$SRC/$p" "$DEST/$p"; fi
 done
 # .claude/commands (Claude Code slash commands, e.g. /grill, /orchestrate)

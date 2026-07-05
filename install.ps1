@@ -31,8 +31,10 @@ try {
     $Src = $Tmp
   }
 
-  # 1. Toolkit files (governance - refreshed on update; instance docs never in source -> untouched)
-  foreach ($p in @("AGENTS.md","CLAUDE.md","README.md","docs",".agents")) {
+  # 1. Toolkit files (governance - refreshed on update; instance docs never in source -> untouched).
+  #    README.md is intentionally NOT copied: it's the toolkit's own adoption doc, and the
+  #    consuming project keeps its own README (force-copying it would overwrite theirs).
+  foreach ($p in @("AGENTS.md","CLAUDE.md","docs",".agents")) {
     $s = Join-Path $Src $p
     if (Test-Path $s) {
       $d = Join-Path $Dest $p

@@ -29,11 +29,13 @@ irm https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.ps1
 curl -fsSL https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.sh | bash
 ```
 
-The installer copies the toolkit (`AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/`, `.agents/`,
+The installer copies the toolkit (`AGENTS.md`, `CLAUDE.md`, `docs/`, `.agents/`,
 `.claude/commands/`), **generates `.claude/skills/`** so Claude Code discovers the skills
-natively, merges the secrets section into `.gitignore`, and runs `git init` if needed. It is
-**idempotent and update-safe** — re-run any time to refresh the toolkit; your `DESCRIPTION`,
-`SPECIFICATION`, `PLAN`, `TASKS`, `MEMORY`, `NOTES` are never overwritten.
+natively, merges the secrets section into `.gitignore`, and runs `git init` if needed. This
+`README.md` is the toolkit's own adoption doc and is **not** copied into your project — your
+project keeps its own README. It is **idempotent and update-safe** — re-run any time to
+refresh the toolkit; your `DESCRIPTION`, `SPECIFICATION`, `PLAN`, `TASKS`, `MEMORY`, `NOTES`
+are never overwritten.
 
 To start a project: open Claude Code or Codex here and say — *"Follow AGENTS.md. No
 DESCRIPTION yet, grill me on <your idea>, then the planning gate, and stop for approval."*
