@@ -40,6 +40,14 @@ For action-allowed / agentic features, require *sustained* success, not a single
 For a new skill or agentic capability: write the eval first, watch it fail, then build
 until it passes. "A skill without a test is a hope, not a capability."
 
+## Toolkit regression harness
+This toolkit's own scenarios live in `evals/cases.json`. Run `python -m evals
+--provider <codex|claude> --suite all --list` to inspect the bound, then add `--yes` for
+a real provider run. It materializes isolated legacy/current/candidate repositories,
+runs hidden checks, and writes JSON plus Markdown reports under `.artifacts/evals/`.
+Infrastructure failures are reported separately and exit with code 2; they do not count
+as behavioral passes or failures.
+
 ## Read → Draft → Act ladder
 Grant capability in stages, gated by evals at each rung:
 1. **Read** — the agent can only observe.

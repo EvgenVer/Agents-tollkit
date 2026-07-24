@@ -15,27 +15,57 @@ vet dependencies, and validate AI behavior with evals — not just tests.
 | `.agents/skills/<name>/SKILL.md` | On-demand procedures (planning, bug-forensics, code-review, …). |
 | `.agents/skills/planning/assets/` | Templates: SPECIFICATION, PLAN, TASKS, DESCRIPTION, MEMORY, NOTES, AGENT_RUNS, spec.feature. |
 | `.claude/commands/` | Claude Code slash commands (e.g. `/grill`, `/orchestrate`) — Claude-Code-specific; other tools use the natural-language trigger. |
-| `.claude/agents/`, `.codex/agents/` | Role agents for opt-in orchestration (executor/reviewer) with editable `model` defaults; the installer copies them **only if absent**, so your model tuning survives updates. |
+| `.claude/agents/`, `.codex/agents/` | Managed role agents for opt-in orchestration (executor/reviewer); local model tuning is never silently overwritten. |
+| `evals/` | Local legacy/current/candidate behavior benchmark with hidden checks and JSON/Markdown reports. |
+| `AGENTS_WORKFLOW_LEGACY/AGENTS_v1.md` | Immutable single-file baseline used by the benchmark. |
 
-## Install (one command)
-From your project directory:
+## Install
+
+Clone or download the toolkit, inspect it, and run the preflight from your project
+directory. The installer deliberately does not fetch executable content. Do not pipe a
+remote script directly into a shell.
 
 ```powershell
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.ps1 | iex
-```
-```bash
-# macOS / Linux / Git-Bash
-curl -fsSL https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.sh | bash
+$toolkit = Join-Path $env:TEMP "Agents-toolkit"
+git clone --depth 1 https://github.com/EvgenVer/Agents-tollkit.git $toolkit
+Get-Content "$toolkit\install.ps1"
+& "$toolkit\install.ps1" -Source $toolkit -DryRun
+& "$toolkit\install.ps1" -Source $toolkit
 ```
 
-The installer copies the toolkit (`AGENTS.md`, `CLAUDE.md`, `docs/`, `.agents/`,
-`.claude/commands/`), **generates `.claude/skills/`** so Claude Code discovers the skills
-natively, merges the secrets section into `.gitignore`, and runs `git init` if needed. This
-`README.md` is the toolkit's own adoption doc and is **not** copied into your project — your
-project keeps its own README. It is **idempotent and update-safe** — re-run any time to
-refresh the toolkit; your `DESCRIPTION`, `SPECIFICATION`, `PLAN`, `TASKS`, `MEMORY`, `NOTES`
-are never overwritten.
+```bash
+# macOS / Linux / Git-Bash
+toolkit="$(mktemp -d)/Agents-toolkit"
+git clone --depth 1 https://github.com/EvgenVer/Agents-tollkit.git "$toolkit"
+less "$toolkit/install.sh"
+bash "$toolkit/install.sh" --source "$toolkit" --dry-run
+bash "$toolkit/install.sh" --source "$toolkit"
+```
+
+The preflight prints every create/update/preserve action and aborts on conflicts before
+writing. The installer updates files it owns using `.agent-toolkit-manifest.tsv` hashes;
+it never deletes project directories, never overwrites a locally modified managed file,
+and does not run `git init`. Project documents and the project's `README.md` remain
+untouched. A locally tuned role-agent file causes a visible conflict so its model choice
+can be reconciled with updated role instructions.
+
+To migrate a project that contains the exact legacy single-file toolkit:
+
+```powershell
+& "$toolkit\install.ps1" -Source $toolkit -DryRun -MigrateLegacy
+& "$toolkit\install.ps1" -Source $toolkit -MigrateLegacy
+```
+
+```bash
+bash "$toolkit/install.sh" --source "$toolkit" --dry-run --migrate-legacy
+bash "$toolkit/install.sh" --source "$toolkit" --migrate-legacy
+```
+
+The old `AGENTS.md` is backed up under `.agent-toolkit-backup/<timestamp>/`. A modified
+legacy file is treated as a conflict and must be reconciled manually. An existing modular
+installation can be adopted without changes when its files exactly match the source;
+otherwise the first manifest-based update stops instead of guessing which edits are yours.
 
 To start a project: open Claude Code or Codex here and say — *"Follow AGENTS.md. No
 DESCRIPTION yet, grill me on <your idea>, then the planning gate, and stop for approval."*
@@ -43,15 +73,39 @@ DESCRIPTION yet, grill me on <your idea>, then the planning gate, and stop for a
 planning gate → risk gate → small-batch implement → validate → self-review → report.
 
 **Optional — orchestrated execution:** once SPEC/PLAN/TASKS are approved, `/orchestrate`
-(Claude Code; explicit phrase in other tools) runs the tasks autonomously via
-executor/reviewer subagents coordinated by the main agent — with an interactive model
-choice per role at start. Strictly opt-in: without the command the workflow is unchanged.
-Details: `docs/AGENT_WORKFLOWS.md` (Orchestrated execution).
+(Claude Code; explicit phrase in other tools) first checks whether parallelism is useful.
+Eligible work runs in dependency-ready waves of up to three disjoint executors, followed
+by integration validation and one final review. Small, sequential, overlapping, or
+high-risk work returns `ORCHESTRATION_NOT_BENEFICIAL` without dispatching subagents.
+Strictly opt-in: without the command the workflow is unchanged.
 
 *Manual install (no script):* copy `AGENTS.md`, `CLAUDE.md`, `docs/`, `.agents/`,
 `.claude/commands/`, `.claude/agents/`, and `.codex/agents/` (not the whole `.claude/` —
 it may hold a machine-specific `settings.local.json`); merge the `.gitignore` secrets
 section; and copy `.agents/skills/` to `.claude/skills/` for native Claude Code discovery.
+
+## Automated comparison
+
+List the deterministic scenarios without calling a model:
+
+```bash
+python -m evals --provider codex --suite all --list
+```
+
+Run a bounded smoke comparison of legacy, the pinned current baseline, and the working
+candidate:
+
+```bash
+python -m evals --provider codex --suite smoke --runs 1 --yes
+```
+
+Use `--provider claude` for Claude Code. `--release` uses five repetitions and enforces
+the comparison gates, including the orchestration wall-clock target. Reports are written
+to `.artifacts/evals/`; provider calls are never made without explicit `--yes`. A real
+run sends the selected fixture and installed toolkit instructions to that provider, so
+review the fixtures and call bound before adding `--yes`. The pinned `current` commit
+must exist locally; fetch it in a shallow CI checkout or override it with
+`--current-ref <commit>`.
 
 ## How the templates are used
 You don't fill these by hand. The master skeletons live in

@@ -1,93 +1,271 @@
-# AI-Agent Workflow Toolkit - installer (PowerShell / Windows)
+# AI-Agent Workflow Toolkit - conflict-safe installer (PowerShell / Windows)
 #
-# From your project directory:
-#   irm https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.ps1 | iex
-# Local/offline test (skip clone, use a local checkout as source):
-#   $env:TK_SRC="C:\path\to\toolkit"; .\install.ps1
-$REPO   = "EvgenVer/Agents-tollkit"   # <-- set to your public GitHub repo (owner/name)
-$BRANCH = "master"
+# Run a downloaded/local script from the target project directory:
+#   .\install.ps1 -DryRun
+#   .\install.ps1
+# Local source:
+#   .\install.ps1 -Source "C:\path\to\toolkit"
+
+[CmdletBinding()]
+param(
+  [switch]$DryRun,
+  [switch]$MigrateLegacy,
+  [string]$Source
+)
+
+$MANIFEST_NAME = ".agent-toolkit-manifest.tsv"
+$MANIFEST_HEADER = "# agent-toolkit-manifest-v1"
+$LEGACY_AGENTS_SHA256 = @(
+  "1b46470215f747767736d7bac454ae621d0a161f0d315bf652ac5b71ee340606",
+  "1af36a2126fca6f13941cd48854f1855b63e4deb052b4692c7e6b1a7ce9a1662"
+)
+$GITIGNORE_MARKER = "# Secrets / env (from AI-Agent toolkit)"
 
 $ErrorActionPreference = "Stop"
 $Dest = (Get-Location).Path
-Write-Host "Installing AI-Agent Workflow Toolkit into: $Dest"
+if ((Get-Item -LiteralPath $Dest -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+  throw "target project root must not be a symbolic link or junction"
+}
 
-$Tmp = $null
-try {
-  if ($env:TK_SRC) {
-    $Src = $env:TK_SRC
-    Write-Host "Using local source: $Src"
-  } else {
-    $Tmp = Join-Path $env:TEMP ("tk_" + [guid]::NewGuid().ToString("N"))
-    Write-Host "Fetching toolkit from https://github.com/$REPO ($BRANCH) ..."
-    # git writes progress ("Cloning into ...") to stderr; under $ErrorActionPreference='Stop'
-    # that becomes a terminating NativeCommandError even on a successful clone, and 2>$null
-    # does not prevent it in Windows PowerShell 5.1. Relax EAP for the call, capture both
-    # streams into a variable (silent on success), and gate on the real exit code.
-    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    $cloneLog = git clone --depth 1 --branch $BRANCH "https://github.com/$REPO.git" $Tmp --quiet 2>&1
-    $cloneExit = $LASTEXITCODE
-    $ErrorActionPreference = $eap
-    if ($cloneExit -ne 0) { throw "clone failed ($cloneExit) - check REPO/BRANCH and that git is installed.`n$cloneLog" }
-    $Src = $Tmp
+function Get-Sha256([string]$Path) {
+  return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+}
+
+function Get-RelativeFile([string]$Root, [string]$FullName) {
+  $rootPath = (Resolve-Path -LiteralPath $Root).Path.TrimEnd([char[]]"\/")
+  return $FullName.Substring($rootPath.Length).TrimStart([char[]]"\/").Replace("\", "/")
+}
+
+function Add-ManagedDirectory(
+  [System.Collections.Generic.List[object]]$List,
+  [string]$SourceRoot,
+  [string]$TargetRoot
+) {
+  if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) { return }
+  if ((Get-Item -LiteralPath $SourceRoot -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+    throw "source directory must not be a symbolic link or junction: $SourceRoot"
   }
-
-  # 1. Toolkit files (governance - refreshed on update; instance docs never in source -> untouched).
-  #    README.md is intentionally NOT copied: it's the toolkit's own adoption doc, and the
-  #    consuming project keeps its own README (force-copying it would overwrite theirs).
-  foreach ($p in @("AGENTS.md","CLAUDE.md","docs",".agents")) {
-    $s = Join-Path $Src $p
-    if (Test-Path $s) {
-      $d = Join-Path $Dest $p
-      if (Test-Path $d) { Remove-Item -Recurse -Force $d }
-      Copy-Item -Recurse -Force $s $d
+  Get-ChildItem -LiteralPath $SourceRoot -Recurse -File |
+    Sort-Object FullName |
+    ForEach-Object {
+      if ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "source file must not be a symbolic link: $($_.FullName)"
+      }
+      $child = Get-RelativeFile $SourceRoot $_.FullName
+      $rel = if ($TargetRoot) { "$TargetRoot/$child" } else { $child }
+      $List.Add([pscustomobject]@{ Source = $_.FullName; Rel = $rel }) | Out-Null
     }
-  }
-  # .claude/commands (Claude Code slash commands, e.g. /grill, /orchestrate)
-  $sc = Join-Path $Src ".claude\commands"
-  if (Test-Path $sc) {
-    New-Item -ItemType Directory -Force (Join-Path $Dest ".claude") | Out-Null
-    $dc = Join-Path $Dest ".claude\commands"
-    if (Test-Path $dc) { Remove-Item -Recurse -Force $dc }
-    Copy-Item -Recurse -Force $sc $dc
-  }
-  # Role agents for orchestration (Claude Code + Codex) - copy-if-absent, so a re-install
-  # never overwrites user-tuned `model` values.
-  foreach ($ag in @(".claude\agents",".codex\agents")) {
-    $sa = Join-Path $Src $ag
-    if (Test-Path $sa) {
-      $da = Join-Path $Dest $ag
-      New-Item -ItemType Directory -Force $da | Out-Null
-      Get-ChildItem $sa -File | ForEach-Object {
-        $df = Join-Path $da $_.Name
-        if (-not (Test-Path $df)) { Copy-Item $_.FullName $df }
+}
+
+function Convert-ToTargetPath([string]$RelativePath) {
+  return Join-Path $Dest $RelativePath.Replace("/", "\")
+}
+
+function Test-ParentPath([string]$TargetPath) {
+  $parent = Split-Path -Parent $TargetPath
+  while ($parent -and $parent.StartsWith($Dest, [System.StringComparison]::OrdinalIgnoreCase) -and $parent -ne $Dest) {
+    if (Test-Path -LiteralPath $parent) {
+      if ((Get-Item -LiteralPath $parent -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        return "parent path is a symbolic link or junction: $parent"
+      }
+      if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        return "parent path is not a directory: $parent"
       }
     }
+    $parent = Split-Path -Parent $parent
   }
-
-  # 2. Generate .claude/skills from .agents/skills (native discovery for Claude Code)
-  $ss = Join-Path $Src ".agents\skills"
-  if (Test-Path $ss) {
-    $ds = Join-Path $Dest ".claude\skills"
-    if (Test-Path $ds) { Remove-Item -Recurse -Force $ds }
-    New-Item -ItemType Directory -Force $ds | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $ss "*") $ds
-  }
-
-  # 3. Merge secrets section into .gitignore (idempotent - marker-guarded)
-  $gi = Join-Path $Dest ".gitignore"
-  if (-not (Test-Path $gi)) { New-Item -ItemType File $gi | Out-Null }
-  if (-not (Select-String -Path $gi -Pattern 'AI-Agent toolkit' -Quiet -ErrorAction SilentlyContinue)) {
-    $sec = @('','# Secrets / env (from AI-Agent toolkit)','.env','.env.*','*.pem','*.key','*.p12','id_rsa*','.ssh/','secrets/','.claude/settings.local.json')
-    Add-Content -Path $gi -Value $sec -Encoding utf8
-  }
-
-  # 4. git init if this isn't a repo yet
-  if (-not (Test-Path (Join-Path $Dest ".git"))) { git init -q | Out-Null }
-
-  Write-Host "`nDone - toolkit installed."
-  Write-Host "Next: open Claude Code or Codex in this directory and say:"
-  Write-Host '  "Follow AGENTS.md. No DESCRIPTION yet - grill me on <your idea>, then the planning gate, and stop for approval."'
+  return $null
 }
-finally {
-  if ($Tmp -and (Test-Path $Tmp)) { Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue }
+
+Write-Host "AI-Agent Workflow Toolkit preflight: $Dest"
+
+try {
+  if ($Source) {
+    $Src = (Resolve-Path -LiteralPath $Source).Path
+  } elseif ($env:TK_SRC) {
+    $Src = (Resolve-Path -LiteralPath $env:TK_SRC).Path
+  } elseif (Test-Path -LiteralPath (Join-Path $PSScriptRoot "AGENTS.md") -PathType Leaf) {
+    $Src = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+  } else {
+    throw "toolkit source not found; run this script from a reviewed toolkit checkout or pass -Source"
+  }
+  Write-Host "Source: $Src"
+
+  $Managed = [System.Collections.Generic.List[object]]::new()
+  foreach ($rel in @("AGENTS.md", "CLAUDE.md")) {
+    $sourceFile = Join-Path $Src $rel
+    if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
+      throw "required source file is missing: $rel"
+    }
+    if ((Get-Item -LiteralPath $sourceFile -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+      throw "required source file must not be a symbolic link: $rel"
+    }
+    $Managed.Add([pscustomobject]@{ Source = $sourceFile; Rel = $rel }) | Out-Null
+  }
+  Add-ManagedDirectory $Managed (Join-Path $Src "docs") "docs"
+  Add-ManagedDirectory $Managed (Join-Path $Src ".agents") ".agents"
+  Add-ManagedDirectory $Managed (Join-Path $Src ".claude\commands") ".claude/commands"
+  Add-ManagedDirectory $Managed (Join-Path $Src ".agents\skills") ".claude/skills"
+  Add-ManagedDirectory $Managed (Join-Path $Src ".claude\agents") ".claude/agents"
+  Add-ManagedDirectory $Managed (Join-Path $Src ".codex\agents") ".codex/agents"
+
+  $duplicates = @($Managed | Group-Object Rel | Where-Object Count -gt 1)
+  if ($duplicates.Count -gt 0) {
+    throw "duplicate managed paths: $($duplicates.Name -join ', ')"
+  }
+
+  $ManifestPath = Join-Path $Dest $MANIFEST_NAME
+  $OldHashes = @{}
+  if (Test-Path -LiteralPath $ManifestPath) {
+    if ((Get-Item -LiteralPath $ManifestPath -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+      throw "$MANIFEST_NAME must not be a symbolic link"
+    }
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+      throw "$MANIFEST_NAME exists but is not a file"
+    }
+    $manifestLines = @(Get-Content -LiteralPath $ManifestPath)
+    if ($manifestLines.Count -eq 0 -or $manifestLines[0] -ne $MANIFEST_HEADER) {
+      throw "unsupported or damaged $MANIFEST_NAME"
+    }
+    foreach ($line in $manifestLines | Select-Object -Skip 1) {
+      if (-not $line) { continue }
+      $parts = $line -split "`t", 2
+      if ($parts.Count -ne 2 -or $parts[1] -notmatch "^[0-9a-fA-F]{64}$") {
+        throw "invalid manifest entry: $line"
+      }
+      $OldHashes[$parts[0]] = $parts[1].ToLowerInvariant()
+    }
+  }
+
+  $Plan = [System.Collections.Generic.List[object]]::new()
+  $Conflicts = [System.Collections.Generic.List[string]]::new()
+  foreach ($item in $Managed) {
+    $target = Convert-ToTargetPath $item.Rel
+    $parentError = Test-ParentPath $target
+    if ($parentError) {
+      $Conflicts.Add("$($item.Rel): $parentError") | Out-Null
+      continue
+    }
+
+    $sourceHash = Get-Sha256 $item.Source
+    if (-not (Test-Path -LiteralPath $target)) {
+      $action = "CREATE"
+    } elseif ((Get-Item -LiteralPath $target -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+      $Conflicts.Add("$($item.Rel): symbolic links are not overwritten") | Out-Null
+      continue
+    } elseif (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+      $Conflicts.Add("$($item.Rel): target exists but is not a file") | Out-Null
+      continue
+    } else {
+      $targetHash = Get-Sha256 $target
+      if ($item.Rel -eq "AGENTS.md" -and $targetHash -in $LEGACY_AGENTS_SHA256) {
+        if ($MigrateLegacy) {
+          $action = "MIGRATE_LEGACY"
+        } else {
+          $Conflicts.Add("AGENTS.md: exact legacy toolkit detected; rerun with -MigrateLegacy") | Out-Null
+          continue
+        }
+      } elseif ($OldHashes.ContainsKey($item.Rel)) {
+        if ($targetHash -ne $OldHashes[$item.Rel]) {
+          $Conflicts.Add("$($item.Rel): locally modified since the previous install") | Out-Null
+          continue
+        }
+        $action = if ($targetHash -eq $sourceHash) { "UNCHANGED" } else { "UPDATE" }
+      } elseif ($targetHash -eq $sourceHash) {
+        $action = "ADOPT"
+      } else {
+        $Conflicts.Add("$($item.Rel): unmanaged file would be overwritten") | Out-Null
+        continue
+      }
+    }
+    $Plan.Add([pscustomobject]@{
+      Action = $action
+      Source = $item.Source
+      Rel = $item.Rel
+      Hash = $sourceHash
+      Target = $target
+    }) | Out-Null
+  }
+
+  $GitignorePath = Join-Path $Dest ".gitignore"
+  if (Test-Path -LiteralPath $GitignorePath) {
+    if ((Get-Item -LiteralPath $GitignorePath -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+      $Conflicts.Add(".gitignore: symbolic links are not modified") | Out-Null
+    } elseif (-not (Test-Path -LiteralPath $GitignorePath -PathType Leaf)) {
+      $Conflicts.Add(".gitignore: target exists but is not a file") | Out-Null
+    }
+  }
+
+  if ($Conflicts.Count -gt 0) {
+    Write-Host "`nCONFLICTS - nothing was changed:" -ForegroundColor Red
+    $Conflicts | ForEach-Object { Write-Host "  - $_" }
+    Write-Host "Back up or reconcile these files, then rerun the installer."
+    exit 2
+  }
+
+  Write-Host "`nPlan:"
+  $Plan | ForEach-Object { Write-Host ("  {0,-16} {1}" -f $_.Action, $_.Rel) }
+  if ($DryRun) {
+    Write-Host "`nDry run complete - nothing was changed."
+    exit 0
+  }
+
+  $migrations = @($Plan | Where-Object Action -eq "MIGRATE_LEGACY")
+  if ($migrations.Count -gt 0) {
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $backupDir = Join-Path $Dest ".agent-toolkit-backup\$stamp"
+    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    Copy-Item -LiteralPath $migrations[0].Target -Destination (Join-Path $backupDir "AGENTS.md")
+    Write-Host "Legacy backup: $backupDir"
+  }
+
+  foreach ($item in $Plan | Where-Object { $_.Action -in @("CREATE", "UPDATE", "MIGRATE_LEGACY") }) {
+    $parent = Split-Path -Parent $item.Target
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    Copy-Item -LiteralPath $item.Source -Destination $item.Target -Force
+  }
+  $gitignoreText = if (Test-Path -LiteralPath $GitignorePath) {
+    [System.IO.File]::ReadAllText($GitignorePath)
+  } else {
+    ""
+  }
+  $requiredIgnoreLines = @(
+    $GITIGNORE_MARKER,
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "id_rsa*",
+    ".ssh/",
+    "secrets/",
+    ".claude/settings.local.json",
+    ".agent-toolkit-backup/"
+  )
+  $existingIgnoreLines = @($gitignoreText -split "\r?\n")
+  $missingIgnoreLines = @(
+    $requiredIgnoreLines | Where-Object { $_ -notin $existingIgnoreLines }
+  )
+  if ($missingIgnoreLines.Count -gt 0) {
+    $section = "`r`n" + ($missingIgnoreLines -join "`r`n") + "`r`n"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($GitignorePath, $gitignoreText + $section, $utf8NoBom)
+  }
+
+  $manifestLines = [System.Collections.Generic.List[string]]::new()
+  $manifestLines.Add($MANIFEST_HEADER) | Out-Null
+  $Plan | Sort-Object Rel | ForEach-Object {
+    $manifestLines.Add("$($_.Rel)`t$($_.Hash)") | Out-Null
+  }
+  $manifestTemp = "$ManifestPath.tmp.$([guid]::NewGuid().ToString('N'))"
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllLines($manifestTemp, $manifestLines, $utf8NoBom)
+  Move-Item -LiteralPath $manifestTemp -Destination $ManifestPath -Force
+
+  Write-Host "`nDone - toolkit installed without deleting project directories."
+  Write-Host "No Git repository was created. Run git init yourself if this project needs it."
+}
+catch {
+  Write-Error $_
+  exit 1
 }

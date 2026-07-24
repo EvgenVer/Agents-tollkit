@@ -1,89 +1,293 @@
 #!/usr/bin/env bash
-# AI-Agent Workflow Toolkit - installer (bash / macOS / Linux / Git-Bash)
+# AI-Agent Workflow Toolkit - conflict-safe installer (macOS / Linux / Git-Bash)
 #
-# From your project directory:
-#   curl -fsSL https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.sh | bash
-# Local/offline test (skip clone, use a local checkout as source):
-#   TK_SRC="/path/to/toolkit" bash install.sh
+# Run a downloaded/local script from the target project directory:
+#   bash install.sh --dry-run
+#   bash install.sh
+# Local source:
+#   bash install.sh --source /path/to/toolkit
 set -euo pipefail
 
-REPO="EvgenVer/Agents-tollkit"   # <-- set to your public GitHub repo (owner/name)
-BRANCH="master"
+MANIFEST_NAME=".agent-toolkit-manifest.tsv"
+MANIFEST_HEADER="# agent-toolkit-manifest-v1"
+LEGACY_AGENTS_SHA256_LF="1b46470215f747767736d7bac454ae621d0a161f0d315bf652ac5b71ee340606"
+LEGACY_AGENTS_SHA256_CRLF="1af36a2126fca6f13941cd48854f1855b63e4deb052b4692c7e6b1a7ce9a1662"
+GITIGNORE_MARKER="# Secrets / env (from AI-Agent toolkit)"
 
-DEST="$(pwd)"
-echo "Installing AI-Agent Workflow Toolkit into: $DEST"
+DRY_RUN=0
+MIGRATE_LEGACY=0
+SOURCE_ARG=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --migrate-legacy) MIGRATE_LEGACY=1; shift ;;
+    --source)
+      [ "$#" -ge 2 ] || { echo "ERROR: --source requires a path" >&2; exit 1; }
+      SOURCE_ARG="$2"; shift 2 ;;
+    --source=*) SOURCE_ARG="${1#--source=}"; shift ;;
+    -h|--help)
+      echo "Usage: bash install.sh [--dry-run] [--migrate-legacy] [--source PATH]"
+      exit 0 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
 
-TMP=""
-cleanup() { if [ -n "$TMP" ]; then rm -rf "$TMP"; fi; }
+DEST="$(pwd -P)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TMP="$(mktemp -d)"
+cleanup() {
+  case "$TMP" in
+    "${TMPDIR:-/tmp}/"*|/tmp/*) rm -rf "$TMP" ;;
+  esac
+}
 trap cleanup EXIT
 
-if [ -n "${TK_SRC:-}" ]; then
-  SRC="$TK_SRC"
-  echo "Using local source: $SRC"
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash_output="$(sha256sum "$1")"
+    printf '%s\n' "${hash_output%% *}"
+  elif command -v shasum >/dev/null 2>&1; then
+    hash_output="$(shasum -a 256 "$1")"
+    printf '%s\n' "${hash_output%% *}"
+  elif command -v openssl >/dev/null 2>&1; then
+    hash_output="$(openssl dgst -sha256 "$1")"
+    printf '%s\n' "${hash_output##* }"
+  else
+    echo "ERROR: sha256sum, shasum, or openssl is required" >&2
+    exit 1
+  fi
+}
+
+if [ -n "$SOURCE_ARG" ]; then
+  SRC="$(cd "$SOURCE_ARG" && pwd -P)"
+elif [ -n "${TK_SRC:-}" ]; then
+  SRC="$(cd "$TK_SRC" && pwd -P)"
+elif [ -f "$SCRIPT_DIR/AGENTS.md" ]; then
+  SRC="$SCRIPT_DIR"
 else
-  TMP="$(mktemp -d)"
-  echo "Fetching toolkit from https://github.com/$REPO ($BRANCH) ..."
-  git clone --depth 1 --branch "$BRANCH" "https://github.com/$REPO.git" "$TMP/tk" >/dev/null 2>&1 \
-    || { echo "ERROR: clone failed - check REPO/BRANCH and that git is installed." >&2; exit 1; }
-  SRC="$TMP/tk"
+  echo "ERROR: toolkit source not found; run this script from a reviewed toolkit checkout or pass --source." >&2
+  exit 1
 fi
 
-# 1. Toolkit files (governance - refreshed on update). Instance docs (DESCRIPTION/SPEC/PLAN/
-#    TASKS/MEMORY/NOTES/AGENT_RUNS) are never in the source, so they are never touched here.
-#    README.md is intentionally NOT copied: it's the toolkit's own adoption doc, and the
-#    consuming project keeps its own README (force-copying it would overwrite theirs).
-for p in AGENTS.md CLAUDE.md docs .agents; do
-  if [ -e "$SRC/$p" ]; then rm -rf "${DEST:?}/$p"; cp -R "$SRC/$p" "$DEST/$p"; fi
-done
-# .claude/commands (Claude Code slash commands, e.g. /grill, /orchestrate)
-if [ -d "$SRC/.claude/commands" ]; then
-  mkdir -p "$DEST/.claude"; rm -rf "$DEST/.claude/commands"
-  cp -R "$SRC/.claude/commands" "$DEST/.claude/commands"
+echo "AI-Agent Workflow Toolkit preflight: $DEST"
+echo "Source: $SRC"
+
+PAIRS="$TMP/managed.tsv"
+PLAN="$TMP/plan.tsv"
+CONFLICTS="$TMP/conflicts.txt"
+: >"$PAIRS"
+: >"$PLAN"
+: >"$CONFLICTS"
+
+add_pair() {
+  [ -f "$1" ] || { echo "ERROR: required source file is missing: $2" >&2; exit 1; }
+  [ ! -L "$1" ] || { echo "ERROR: source file must not be a symbolic link: $2" >&2; exit 1; }
+  printf '%s\t%s\n' "$1" "$2" >>"$PAIRS"
+}
+
+add_tree() {
+  source_root="$1"
+  target_root="$2"
+  [ -d "$source_root" ] || return 0
+  source_link="$(find "$source_root" -type l -print -quit)"
+  [ -z "$source_link" ] || {
+    echo "ERROR: source tree contains a symbolic link: $source_link" >&2
+    exit 1
+  }
+  find "$source_root" -type f -print | LC_ALL=C sort | while IFS= read -r source_file; do
+    child="${source_file#"$source_root"/}"
+    printf '%s\t%s/%s\n' "$source_file" "$target_root" "$child" >>"$PAIRS"
+  done
+}
+
+add_pair "$SRC/AGENTS.md" "AGENTS.md"
+add_pair "$SRC/CLAUDE.md" "CLAUDE.md"
+add_tree "$SRC/docs" "docs"
+add_tree "$SRC/.agents" ".agents"
+add_tree "$SRC/.claude/commands" ".claude/commands"
+add_tree "$SRC/.agents/skills" ".claude/skills"
+add_tree "$SRC/.claude/agents" ".claude/agents"
+add_tree "$SRC/.codex/agents" ".codex/agents"
+
+duplicates="$(cut -f2 "$PAIRS" | LC_ALL=C sort | uniq -d)"
+if [ -n "$duplicates" ]; then
+  echo "ERROR: duplicate managed paths: $duplicates" >&2
+  exit 1
 fi
-# Role agents for orchestration (Claude Code + Codex) - copy-if-absent, so a re-install
-# never overwrites user-tuned `model` values.
-for ag in .claude/agents .codex/agents; do
-  if [ -d "$SRC/$ag" ]; then
-    mkdir -p "$DEST/$ag"
-    for f in "$SRC/$ag"/*; do
-      [ -e "$f" ] || continue
-      b="$(basename "$f")"
-      [ -e "$DEST/$ag/$b" ] || cp "$f" "$DEST/$ag/$b"
-    done
+
+MANIFEST="$DEST/$MANIFEST_NAME"
+if [ -L "$MANIFEST" ]; then
+  echo "$MANIFEST_NAME: symbolic links are not supported" >>"$CONFLICTS"
+elif [ -e "$MANIFEST" ]; then
+  [ -f "$MANIFEST" ] || { echo "$MANIFEST_NAME: target is not a file" >>"$CONFLICTS"; }
+  if [ -f "$MANIFEST" ]; then
+    IFS= read -r manifest_header <"$MANIFEST" || true
+    [ "$manifest_header" = "$MANIFEST_HEADER" ] || {
+      echo "$MANIFEST_NAME: unsupported or damaged manifest" >>"$CONFLICTS"
+    }
+    while IFS=$'\t' read -r manifest_rel manifest_hash manifest_extra; do
+      [ -n "$manifest_rel" ] || continue
+      case "$manifest_hash" in
+        *[!0-9a-fA-F]*|"") echo "$MANIFEST_NAME: invalid hash for $manifest_rel" >>"$CONFLICTS" ;;
+        *) [ "${#manifest_hash}" -eq 64 ] || echo "$MANIFEST_NAME: invalid hash for $manifest_rel" >>"$CONFLICTS" ;;
+      esac
+      [ -z "${manifest_extra:-}" ] || echo "$MANIFEST_NAME: invalid entry for $manifest_rel" >>"$CONFLICTS"
+    done < <(tail -n +2 "$MANIFEST")
+  fi
+fi
+
+lookup_old_hash() {
+  OLD_HASH_RESULT=""
+  [ -f "$MANIFEST" ] || return 0
+  while IFS=$'\t' read -r old_rel old_hash_value old_extra; do
+    if [ "$old_rel" = "$1" ]; then
+      OLD_HASH_RESULT="$(printf '%s' "$old_hash_value" | tr 'A-F' 'a-f')"
+      return 0
+    fi
+  done <"$MANIFEST"
+}
+
+find_parent_conflict() {
+  PARENT_CONFLICT_RESULT=""
+  remaining="$1"
+  current_parent="$DEST"
+  while [ "${remaining#*/}" != "$remaining" ]; do
+    component="${remaining%%/*}"
+    remaining="${remaining#*/}"
+    current_parent="$current_parent/$component"
+    if [ -L "$current_parent" ]; then
+      PARENT_CONFLICT_RESULT="$current_parent (symbolic link)"
+      return 0
+    elif [ -e "$current_parent" ] && [ ! -d "$current_parent" ]; then
+      PARENT_CONFLICT_RESULT="$current_parent"
+      return 0
+    fi
+  done
+}
+
+while IFS=$'\t' read -r source_file rel; do
+  target="$DEST/$rel"
+  source_hash="$(sha256_file "$source_file")"
+  find_parent_conflict "$rel"
+  bad_parent="$PARENT_CONFLICT_RESULT"
+  if [ -n "$bad_parent" ]; then
+    echo "$rel: parent path is not a directory: $bad_parent" >>"$CONFLICTS"
+    continue
+  fi
+  if [ -L "$target" ]; then
+    echo "$rel: symbolic links are not overwritten" >>"$CONFLICTS"
+    continue
+  elif [ ! -e "$target" ]; then
+    action="CREATE"
+  elif [ ! -f "$target" ]; then
+    echo "$rel: target exists but is not a file" >>"$CONFLICTS"
+    continue
+  else
+    target_hash="$(sha256_file "$target")"
+    lookup_old_hash "$rel"
+    old_hash="$OLD_HASH_RESULT"
+    if [ "$rel" = "AGENTS.md" ] &&
+      { [ "$target_hash" = "$LEGACY_AGENTS_SHA256_LF" ] ||
+        [ "$target_hash" = "$LEGACY_AGENTS_SHA256_CRLF" ]; }
+    then
+      if [ "$MIGRATE_LEGACY" -eq 1 ]; then
+        action="MIGRATE_LEGACY"
+      else
+        echo "AGENTS.md: exact legacy toolkit detected; rerun with --migrate-legacy" >>"$CONFLICTS"
+        continue
+      fi
+    elif [ -n "$old_hash" ]; then
+      if [ "$target_hash" != "$old_hash" ]; then
+        echo "$rel: locally modified since the previous install" >>"$CONFLICTS"
+        continue
+      elif [ "$target_hash" = "$source_hash" ]; then
+        action="UNCHANGED"
+      else
+        action="UPDATE"
+      fi
+    elif [ "$target_hash" = "$source_hash" ]; then
+      action="ADOPT"
+    else
+      echo "$rel: unmanaged file would be overwritten" >>"$CONFLICTS"
+      continue
+    fi
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$action" "$source_file" "$rel" "$source_hash" >>"$PLAN"
+done <"$PAIRS"
+
+GITIGNORE="$DEST/.gitignore"
+if [ -L "$GITIGNORE" ]; then
+  echo ".gitignore: symbolic links are not modified" >>"$CONFLICTS"
+elif [ -e "$GITIGNORE" ] && [ ! -f "$GITIGNORE" ]; then
+  echo ".gitignore: target exists but is not a file" >>"$CONFLICTS"
+fi
+
+if [ -s "$CONFLICTS" ]; then
+  echo
+  echo "CONFLICTS - nothing was changed:" >&2
+  sed 's/^/  - /' "$CONFLICTS" >&2
+  echo "Back up or reconcile these files, then rerun the installer." >&2
+  exit 2
+fi
+
+echo
+echo "Plan:"
+while IFS=$'\t' read -r action source_file rel source_hash; do
+  printf '  %-16s %s\n' "$action" "$rel"
+done <"$PLAN"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo
+  echo "Dry run complete - nothing was changed."
+  exit 0
+fi
+
+if grep -q '^MIGRATE_LEGACY	' "$PLAN"; then
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  backup_dir="$DEST/.agent-toolkit-backup/$stamp"
+  mkdir -p "$backup_dir"
+  cp "$DEST/AGENTS.md" "$backup_dir/AGENTS.md"
+  echo "Legacy backup: $backup_dir"
+fi
+
+while IFS=$'\t' read -r action source_file rel source_hash; do
+  case "$action" in
+    CREATE|UPDATE|MIGRATE_LEGACY)
+      target="$DEST/$rel"
+      mkdir -p "${target%/*}"
+      cp "$source_file" "$target"
+      ;;
+  esac
+done <"$PLAN"
+
+if [ ! -f "$GITIGNORE" ]; then
+  : >"$GITIGNORE"
+fi
+for ignore_line in \
+  "$GITIGNORE_MARKER" \
+  ".env" \
+  ".env.*" \
+  "*.pem" \
+  "*.key" \
+  "*.p12" \
+  "id_rsa*" \
+  ".ssh/" \
+  "secrets/" \
+  ".claude/settings.local.json" \
+  ".agent-toolkit-backup/"
+do
+  if ! grep -Fqx -- "$ignore_line" "$GITIGNORE"; then
+    printf '%s\n' "$ignore_line" >>"$GITIGNORE"
   fi
 done
 
-# 2. Generate .claude/skills/ from .agents/skills/ so Claude Code discovers them natively
-#    (Codex & Antigravity already read .agents/skills/ directly).
-if [ -d "$SRC/.agents/skills" ]; then
-  rm -rf "$DEST/.claude/skills"; mkdir -p "$DEST/.claude/skills"
-  cp -R "$SRC/.agents/skills/." "$DEST/.claude/skills/"
-fi
+manifest_tmp="$TMP/new-manifest.tsv"
+{
+  printf '%s\n' "$MANIFEST_HEADER"
+  cut -f3,4 "$PLAN" | LC_ALL=C sort
+} >"$manifest_tmp"
+mv "$manifest_tmp" "$MANIFEST"
 
-# 3. Merge the secrets section into the project's .gitignore (idempotent - marker-guarded).
-touch "$DEST/.gitignore"
-if ! grep -q 'AI-Agent toolkit' "$DEST/.gitignore" 2>/dev/null; then
-  cat >> "$DEST/.gitignore" <<'GI'
-
-# Secrets / env (from AI-Agent toolkit)
-.env
-.env.*
-*.pem
-*.key
-*.p12
-id_rsa*
-.ssh/
-secrets/
-.claude/settings.local.json
-GI
-fi
-
-# 4. git init if this isn't a repo yet (proactive commits need history).
-[ -d "$DEST/.git" ] || git -C "$DEST" init -q
-
-cat <<'MSG'
-
-Done - toolkit installed.
-Next: open Claude Code or Codex in this directory and say:
-  "Follow AGENTS.md. No DESCRIPTION yet - grill me on <your idea>, then the planning gate, and stop for approval."
-MSG
+echo
+echo "Done - toolkit installed without deleting project directories."
+echo "No Git repository was created. Run git init yourself if this project needs it."

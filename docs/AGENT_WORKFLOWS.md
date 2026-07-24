@@ -41,7 +41,7 @@ changes. Modes constrain *what the agent is allowed to do*, not just its tone.
 | **Builder** | Implement an approved plan | Edit/create code within scope, small batches, show diffs | Scope creep, unapproved deps | — |
 | **Forensic** | Diagnose & fix a bug | Reproduce, add failing test, fix root cause, regression test | Speculative fixes, unrelated refactors | `bug-forensics` |
 | **Reviewer** | Review a change | Read, analyze, report findings (risk-ranked) | **Editing code unless asked** | `code-review` |
-| **Orchestrator** | Coordinate approved TASKS via subagents (opt-in) | Brief/dispatch subagents, integrate, validate, commit, update TASKS | Direct production edits; reviewing its own integration | `orchestration` |
+| **Orchestrator** | Accelerate eligible approved TASKS via bounded parallel waves (opt-in) | Gate, schedule, brief/dispatch, integrate, validate, commit, update TASKS | Direct production edits; serial dispatch disguised as orchestration | `orchestration` |
 | **Author** | Write docs/prose | Create/update docs, README, comments | Behavior change | `docs-maintenance` |
 | **Librarian** | Organize/retrieve knowledge | Search, summarize, index, cross-link | Behavior change | — |
 | **Discussion** (default) | Refine, compare, advise | Questions, options, tradeoffs | Edits, installs, implementation |
@@ -144,37 +144,24 @@ request — `/orchestrate` in Claude Code, an explicit phrase elsewhere. Never
 self-triggered. Procedure: the `orchestration` skill. Without activation, the standard
 workflow above applies unchanged — same gates, same stops.
 
-The main agent becomes a **coordinator** (Orchestrator Mode): it briefs an `executor`
-subagent per approved atomic task, has each result checked by a `reviewer` subagent in a
-fresh context (budget: **≤2 fix iterations** per task, then escalate or park in Blocked),
-runs each task's `verify:`, commits per logical block, and updates `TASKS.md`. It does not edit production code itself. All gates stay in force: high-risk
-actions → Vibe Diff + STOP even mid-run; unresolved decisions → parked in Blocked.
+The main agent first applies a **benefit gate**. Orchestration runs only when at least
+three meaningful tasks remain, the dependency-ready width is at least two, selected file
+scopes are disjoint, contracts are stable, checks are bounded, and the environment can
+actually dispatch concurrently. A failed gate returns
+`ORCHESTRATION_NOT_BENEFICIAL` before any subagent starts; the caller can then choose the
+normal sequential workflow.
 
-### Model tiers
-| Role | Model | Why |
-|------|-------|-----|
-| Orchestrator | strongest (= session model) | Judgment concentrates here: briefs, integration, arbitration |
-| Executor | mid-tier (default `sonnet`) | Bulk of the tokens; sufficient **if** tasks are atomic with a clear `verify:` |
-| Reviewer | strong (default `opus`) | Compact input (diff + checklist) — a strong model is cheap here |
+Eligible work runs in waves of at most three executors. The coordinator dispatches every
+executor in a wave before waiting, rejects scope overlap, and runs task plus integration
+checks after the wave. Executors self-verify. One fresh-context reviewer checks the final
+integrated diff; a targeted reviewer is added only after a validation failure. The
+correction budget is one iteration.
 
-Defaults live in the role agent files and are user-editable; the orchestration preflight
-proposes them interactively before each run. The cheap-executor economics hold only when
-`TASKS.md` is well decomposed — plan quality is what buys execution savings.
+This structure targets wall-clock improvement and avoids promising token savings that
+the environment cannot guarantee. Role definitions may still pin models, but preflight
+only reports the effective choices. It asks the user again only for an unavailable model,
+a fallback/material change, or an explicit model-selection request.
 
-### Environment support (verified 2026-07 — re-check against current tool docs)
-| | Claude Code | Codex | Antigravity |
-|---|---|---|---|
-| Role definitions | `.claude/agents/*.md` | `.codex/agents/*.toml` | dynamic — roles conveyed in spawn briefs |
-| Model per role | yes (frontmatter + per-invocation override) | yes (TOML `model`) | no — session model |
-| Reviewer cannot edit | enforced (`tools` allowlist) | enforced (`sandbox_mode = "read-only"`) | contractual (prompt-level) |
-| Activation | `/orchestrate` or phrase | explicit phrase | explicit phrase |
-
-No subagents at all → the skill reports it and offers the standard sequential workflow
-(the no-workaround rule above applies). For parallel executors, Claude Code also supports
-`isolation: worktree` in agent frontmatter (isolated repo copy per subagent) — an option
-when disjoint `files:` scoping isn't enough.
-
-### When NOT to orchestrate
-- A single small task or a trivial change — subagent cold-start overhead outweighs the
-  benefit; orchestration pays off on multi-task phases.
-- Unapproved plan/TASKS — the planning gate comes first, always.
+All gates remain in force: high-risk actions stop even mid-run; unresolved decisions and
+overlapping ownership are blocked. No subagents or no safe concurrent writes means the
+benefit gate declines orchestration instead of silently running a slower serial variant.
