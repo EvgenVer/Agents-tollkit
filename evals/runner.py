@@ -254,6 +254,19 @@ def _snapshot(path: Path) -> dict[str, str]:
     return snapshot
 
 
+def _snapshot_after_provider(
+    workspace: Path,
+    before: dict[str, str],
+    provider_result: ProviderResult,
+) -> dict[str, str]:
+    try:
+        return _snapshot(workspace)
+    except OSError as exc:
+        provider_result.status = "infrastructure_failure"
+        provider_result.error = f"workspace snapshot failed: {exc}"
+        return before
+
+
 def _json_events(stdout: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     stripped = stdout.strip()
@@ -786,7 +799,7 @@ def _single_run(
                 max_budget_usd=args.max_budget_usd,
             )
 
-        after = _snapshot(workspace)
+        after = _snapshot_after_provider(workspace, before, provider_result)
         grade = _grade(case, workspace, before, after, provider_result)
         return RunResult(
             case_id=case["id"],
@@ -1218,7 +1231,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--windows-sandbox",
         choices=("elevated", "unelevated"),
-        help="Native Windows sandbox backend for Codex (defaults to elevated on Windows).",
+        help="Native Windows sandbox backend for Codex (defaults to unelevated on Windows).",
     )
     parser.add_argument("--max-budget-usd", type=float)
     parser.add_argument("--current-ref", default=DEFAULT_CURRENT_REF)
@@ -1276,7 +1289,9 @@ def main(argv: list[str] | None = None) -> int:
             "are Codex-only"
         )
     if args.provider == "codex" and os.name == "nt" and args.windows_sandbox is None:
-        args.windows_sandbox = "elevated"
+        # The elevated backend can leave newly-created files readable only by the
+        # sandbox account. The eval parent must read every artifact for grading.
+        args.windows_sandbox = "unelevated"
     enforce_gates = args.release or args.enforce_gates
     if enforce_gates and args.provider == "codex" and not args.model:
         parser.error("--model is required when comparison gates are enforced")

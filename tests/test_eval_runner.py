@@ -18,7 +18,7 @@ class EvalRunnerTests(unittest.TestCase):
                 model="gpt-5.6-sol",
                 reasoning_effort="high",
                 service_tier="default",
-                windows_sandbox="elevated",
+                windows_sandbox="unelevated",
                 orchestration=True,
                 max_budget_usd=None,
             )
@@ -28,7 +28,7 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertIn('approval_policy="never"', command)
         self.assertIn('model_reasoning_effort="high"', command)
         self.assertIn('service_tier="default"', command)
-        self.assertIn('windows.sandbox="elevated"', command)
+        self.assertIn('windows.sandbox="unelevated"', command)
         self.assertIn("multi_agent", command)
 
     def test_codex_provider_drops_parent_desktop_session_environment(self) -> None:
@@ -46,6 +46,30 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(env["EVAL_KEEP_ME"], "yes")
         for key in runner.CODEX_SESSION_ENV_KEYS:
             self.assertNotIn(key, env)
+
+    def test_snapshot_failure_is_classified_as_infrastructure(self) -> None:
+        provider_result = runner.ProviderResult(
+            status="success",
+            exit_code=0,
+            duration_ms=1,
+        )
+        before = {"README.md": "hash"}
+
+        with patch.object(
+            runner,
+            "_snapshot",
+            side_effect=PermissionError("access denied"),
+        ):
+            after = runner._snapshot_after_provider(
+                Path("workspace"),
+                before,
+                provider_result,
+            )
+
+        self.assertEqual(before, after)
+        self.assertEqual("infrastructure_failure", provider_result.status)
+        self.assertIn("workspace snapshot failed", provider_result.error)
+        self.assertIn("access denied", provider_result.error)
 
     def test_model_cli_version_mismatch_is_infrastructure(self) -> None:
         output = (
