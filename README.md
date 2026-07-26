@@ -114,7 +114,7 @@ artifacts remain readable by the parent grading process, and removes inherited C
 Desktop session-policy variables from child CLI processes. The `workspace-write`
 boundary remains active. Temporary fixture checkouts are created below the selected
 artifacts directory instead of the system `%TEMP%`, which keeps them inside the
-provider's accessible workspace tree.
+provider's accessible workspace tree and preserves inherited sandbox ACLs.
 The enforced gates require the candidate workflow to stay within 15% of legacy/current
 for wall time and tokens while passing every run. Candidate orchestration is compared
 with the same candidate executing the same fixture sequentially; it must preserve

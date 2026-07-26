@@ -11,13 +11,14 @@ import statistics
 import subprocess
 import sys
 import tarfile
-import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
+from uuid import uuid4
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -273,6 +274,18 @@ def _eval_workspace_root(artifacts: Path) -> Path:
     return root
 
 
+@contextmanager
+def _temporary_eval_root(artifacts: Path) -> Iterator[Path]:
+    temp_root = _eval_workspace_root(artifacts) / f"toolkit-eval-{uuid4().hex}"
+    # tempfile.mkdtemp uses an owner-only ACL on Windows. A normal directory
+    # inherits the project ACL required by Codex's restricted sandbox token.
+    temp_root.mkdir()
+    try:
+        yield temp_root
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+
+
 def _json_events(stdout: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     stripped = stdout.strip()
@@ -445,7 +458,12 @@ def _classify_infrastructure_failure(
             "read-only filesystem access",
             "patch rejected: writing is blocked",
         )
-        if any(marker in text for marker in write_block_markers):
+        workspace_access_denied = (
+            "access is denied" in text and "workspace" in text
+        )
+        if workspace_access_denied or any(
+            marker in text for marker in write_block_markers
+        ):
             return "provider workspace is not writable"
     if returncode == 0:
         return None
@@ -755,12 +773,7 @@ def _single_run(
     seed: int,
     args: argparse.Namespace,
 ) -> RunResult:
-    with tempfile.TemporaryDirectory(
-        prefix="toolkit-eval-",
-        dir=_eval_workspace_root(args.artifacts),
-        ignore_cleanup_errors=True,
-    ) as temp:
-        temp_root = Path(temp)
+    with _temporary_eval_root(args.artifacts) as temp_root:
         workspace = temp_root / "workspace"
         fixture = ROOT / "evals" / "fixtures" / case["fixture"]
         if not fixture.exists():

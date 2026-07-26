@@ -12,12 +12,13 @@ class EvalRunnerTests(unittest.TestCase):
     def test_eval_workspaces_are_created_beneath_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             artifacts = Path(temp) / "reports"
-            workspace_root = runner._eval_workspace_root(artifacts)
+            with runner._temporary_eval_root(artifacts) as temp_root:
+                workspace_root = runner._eval_workspace_root(artifacts)
 
-            self.assertEqual(
-                (artifacts / "_workspaces").resolve(),
-                workspace_root,
-            )
+                self.assertEqual(workspace_root, temp_root.parent)
+                self.assertTrue(temp_root.is_dir())
+
+            self.assertFalse(temp_root.exists())
             self.assertTrue(workspace_root.is_dir())
 
     def test_codex_command_pins_model_reasoning_and_service_tier(self) -> None:
@@ -106,6 +107,15 @@ class EvalRunnerTests(unittest.TestCase):
             runner._classify_infrastructure_failure(
                 0, output, requires_write=False
             )
+        )
+        self.assertEqual(
+            runner._classify_infrastructure_failure(
+                0,
+                "Get-ChildItem: Access to the path workspace is denied. "
+                "Access is denied.",
+                requires_write=True,
+            ),
+            "provider workspace is not writable",
         )
 
     def test_dispatch_count_recognizes_namespaced_spawn_agent(self) -> None:

@@ -52,7 +52,7 @@ Native Windows provider runs default to the `unelevated` sandbox backend so the 
 grader can read newly-created artifacts, and do not inherit parent Codex Desktop
 session-policy variables. Temporary fixture checkouts live under the selected artifacts
 directory rather than the system temporary directory, keeping them accessible to the
-native sandbox.
+native sandbox with inherited project ACLs.
 Full comparison gates use the same workflow cases for legacy/current/candidate, and
 compare candidate orchestration with the same candidate fixture executed sequentially.
 
