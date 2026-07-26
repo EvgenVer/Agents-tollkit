@@ -133,6 +133,8 @@ class EvalCaseTests(unittest.TestCase):
         case = {
             "grade": {
                 "candidate_max_commands": 2,
+                "candidate_max_command_rounds": 1,
+                "candidate_max_model_turns": 1,
                 "candidate_max_skill_reads": 0,
             }
         }
@@ -141,6 +143,8 @@ class EvalCaseTests(unittest.TestCase):
             exit_code=0,
             duration_ms=1,
             command_count=3,
+            command_round_count=2,
+            model_turn_count=2,
             skill_read_count=1,
         )
         with tempfile.TemporaryDirectory() as temp:
@@ -174,17 +178,55 @@ class EvalCaseTests(unittest.TestCase):
                 },
             },
             {
+                "type": "item.started",
+                "item": {
+                    "type": "command_execution",
+                    "command": "python -m unittest",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": "python -m unittest",
+                },
+            },
+            {
                 "type": "item.completed",
                 "item": {"type": "agent_message", "text": "done"},
             },
         ]
         metrics = runner._trajectory_metrics(events)
-        self.assertEqual(metrics["command_count"], 1)
+        self.assertEqual(metrics["command_count"], 2)
+        self.assertEqual(metrics["command_round_count"], 2)
         self.assertEqual(metrics["model_turn_count"], 1)
         self.assertEqual(metrics["skill_read_count"], 1)
         self.assertEqual(metrics["review_skill_read_count"], 1)
         self.assertEqual(metrics["docs_read_count"], 1)
         self.assertEqual(metrics["git_command_count"], 1)
+
+    def test_parallel_commands_share_one_round(self) -> None:
+        events = [
+            {
+                "type": "item.started",
+                "item": {"type": "command_execution", "command": "git status"},
+            },
+            {
+                "type": "item.started",
+                "item": {"type": "command_execution", "command": "rg --files"},
+            },
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "command": "git status"},
+            },
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "command": "rg --files"},
+            },
+        ]
+        metrics = runner._trajectory_metrics(events)
+        self.assertEqual(metrics["command_count"], 2)
+        self.assertEqual(metrics["command_round_count"], 1)
 
     def test_fixture_copy_ignores_generated_python_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

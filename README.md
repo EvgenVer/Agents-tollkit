@@ -70,13 +70,16 @@ otherwise the first manifest-based update stops instead of guessing which edits 
 To start a project: open Claude Code or Codex here and say — *"Follow AGENTS.md. No
 DESCRIPTION yet, grill me on <your idea>, then the planning gate, and stop for approval."*
 (In Claude Code you can also run `/grill`.) From there the agent runs: bootstrap DESCRIPTION →
-planning gate → risk gate → small-batch implement → validate → self-review → report.
+planning gate → risk gate → small-batch implement → validate → proportional review →
+report. Read-only and trivial work use a fast path without workflow-skill, run-log, or
+commit ceremony; every write still gets a final diff/scope/evidence check.
 
 **Optional — orchestrated execution:** once SPEC/PLAN/TASKS are approved, `/orchestrate`
 (Claude Code; explicit phrase in other tools) first checks whether parallelism is useful.
-Eligible work runs in dependency-ready waves of up to three disjoint executors, followed
-by integration validation and one final review. Small, sequential, overlapping, or
-high-risk work returns `ORCHESTRATION_NOT_BENEFICIAL` without dispatching subagents.
+Eligible substantial work runs in dependency-ready waves of up to three disjoint,
+single-check executors, followed by integration validation and one final review. Small,
+sequential, overlapping, or high-risk work returns `ORCHESTRATION_NOT_BENEFICIAL`
+without dispatching subagents.
 Strictly opt-in: without the command the workflow is unchanged.
 
 *Manual install (no script):* copy `AGENTS.md`, `CLAUDE.md`, `docs/`, `.agents/`,
@@ -99,7 +102,7 @@ candidate:
 python -m evals --provider codex --suite smoke --runs 1 --yes
 ```
 
-Run the reproducible three-pass comparison (75 provider calls) from a standalone terminal,
+Run the reproducible three-pass comparison (81 provider calls) from a standalone terminal,
 not from a nested Codex Desktop session:
 
 ```bash
@@ -115,11 +118,15 @@ Desktop session-policy variables from child CLI processes. The `workspace-write`
 boundary remains active. Temporary fixture checkouts are created below the selected
 artifacts directory instead of the system `%TEMP%`, which keeps them inside the
 provider's accessible workspace tree and preserves inherited sandbox ACLs.
-The enforced gates require the candidate workflow to stay within 15% of legacy/current
-for wall time and tokens while passing every run. Candidate orchestration is compared
-with the same candidate executing the same fixture sequentially; it must preserve
-quality, dispatch real parallel agents, reduce median wall time by at least 20%, and
-keep tokens within 1.5x.
+Reports separate cached input, uncached input/output, commands, model turns, skill/doc
+reads, git commands, direct dispatches, and collaboration waits. The enforced Legacy
+gate requires every candidate run to pass, aggregate median wall time and total tokens
+to stay within 10%, uncached-input-plus-output not to exceed Legacy, and the six core
+workflow cases to use at most 48 raw median commands and 25 sequential command rounds in
+total. Provider-reported cost, when available, must not exceed Legacy. The same full
+sequential implementation is also run under Legacy and Candidate instructions.
+Candidate orchestration must preserve quality, show real parallel collaboration, reduce
+median wall time by at least 20%, and keep tokens within 1.5x of Candidate sequential.
 
 Use `--provider claude` for Claude Code. `--release` uses five repetitions and enforces
 the same gates. Reports are written to `.artifacts/evals/`; provider calls are never made
@@ -131,9 +138,10 @@ or override it with `--current-ref <commit>`.
 ## How the templates are used
 You don't fill these by hand. The master skeletons live in
 `.agents/skills/planning/assets/` as `*.template.md` and stay there for reuse. When the
-planning gate runs, **the agent instantiates them**: it reads a skeleton and writes the
-real document into the project — `SPECIFICATION.template.md` → `SPECIFICATION.md` —
-dropping the `.template` suffix and deleting the commented-out EXAMPLE block.
+planning gate creates a missing document, **the agent instantiates only the required
+templates in one batch**: `SPECIFICATION.template.md` → `SPECIFICATION.md`, dropping the
+`.template` suffix and deleting the commented-out EXAMPLE block. Existing documents
+define their own structure and are updated directly.
 
 Your role is to supply the content and decisions (especially `DESCRIPTION` at the start)
 and to approve. The agent fills them in this order: `DESCRIPTION` → `SPECIFICATION` →

@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: Execute an approved TASKS.md with bounded parallel executor waves and one integration review. Use ONLY after an explicit /orchestrate or equivalent request. Before dispatching, decline with ORCHESTRATION_NOT_BENEFICIAL when fewer than three meaningful tasks exist, the ready-set width is below two, file scopes overlap, shared contracts are unresolved, risk is high, or safe parallel subagents are unavailable. Do not use for planning or ordinary sequential implementation.
+description: Execute substantial approved TASKS.md work with bounded parallel executor waves and one integration review. Use ONLY after an explicit /orchestrate or equivalent request. Before dispatching, decline with ORCHESTRATION_NOT_BENEFICIAL when fewer than three meaningful tasks exist, fewer than two ready tasks contain substantial independent implementation/slow verification, the ready-set width is below two, file scopes overlap, shared contracts are unresolved, risk is high, or safe parallel subagents are unavailable. Do not use for planning, small functions/boilerplate, or ordinary sequential implementation.
 ---
 
 # Orchestration
@@ -35,6 +35,9 @@ Dispatch no subagents unless all conditions hold:
 
 - at least three meaningful active tasks remain;
 - at least two tasks are ready at the same time;
+- at least two ready tasks contain substantial implementation or slow independent
+  verification; several tiny functions / wrappers / prose edits do not qualify merely
+  because they are split into separate files;
 - at least two ready tasks have disjoint declared file scopes;
 - no selected task changes an unresolved shared API, schema, type, migration, dependency,
   security boundary, or other shared contract;
@@ -61,7 +64,7 @@ integration. It:
 - dispatches all executors in a wave before waiting;
 - validates returned file scopes and rejects unrelated changes;
 - runs integration checks after each wave;
-- commits a validated logical wave when repository policy calls for commits;
+- commits only when the user or repository explicitly requested it;
 - performs one final independent review of the integrated diff.
 
 ## Wave algorithm
@@ -72,16 +75,19 @@ Repeat until no active tasks remain:
 2. Select the maximum safe disjoint set, capped at three. If two or more eligible tasks
    are ready, never dispatch a one-task wave.
 3. Brief each executor with only its task, exact file ownership, relevant contract
-   excerpt, verification command, and areas it must not touch.
+   excerpt, one verification command, and areas it must not touch. Explicitly forbid
+   planning, `code-review`, run-log/TASKS updates, commits, and unrelated validation.
 4. Dispatch every executor in the wave before waiting for any result.
 5. Collect concise results: changed files, verification command and outcome, blockers.
 6. Reject scope overlap or unrelated edits. Stop the affected task rather than merging
    ambiguous ownership.
-7. Run the wave's task checks and the smallest relevant integration check.
+7. Run each check once for the resulting code state, then the smallest relevant
+   integration check. Do not repeat a passing check without a relevant change.
 8. Mark verified tasks complete; leave failed tasks blocked with evidence. Recompute the
    next ready set.
 
-Executors self-verify their atomic work. Do not dispatch a reviewer per successful task.
+Executors self-verify their atomic work and return only changed files, their one command,
+and its outcome. Do not dispatch a reviewer per successful task.
 
 ## Review and correction budget
 

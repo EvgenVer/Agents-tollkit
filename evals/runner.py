@@ -59,6 +59,7 @@ class ProviderResult:
     dispatch_count: int = 0
     collaboration_wait_count: int = 0
     command_count: int = 0
+    command_round_count: int = 0
     model_turn_count: int = 0
     skill_read_count: int = 0
     review_skill_read_count: int = 0
@@ -380,6 +381,18 @@ def _collaboration_wait_count(events: list[dict[str, Any]]) -> int:
 
 def _trajectory_metrics(events: list[dict[str, Any]]) -> dict[str, int]:
     commands = _started_items(events, "command_execution")
+    command_rounds = 0
+    command_in_flight = False
+    for event in events:
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "command_execution":
+            continue
+        if event.get("type") == "item.started":
+            if not command_in_flight:
+                command_rounds += 1
+            command_in_flight = True
+        elif event.get("type") == "item.completed":
+            command_in_flight = False
     command_text = "\n".join(
         item["command"] for item in commands if isinstance(item.get("command"), str)
     )
@@ -415,6 +428,7 @@ def _trajectory_metrics(events: list[dict[str, Any]]) -> dict[str, int]:
     )
     return {
         "command_count": len(commands),
+        "command_round_count": command_rounds,
         "model_turn_count": model_turns,
         "skill_read_count": skill_reads,
         "review_skill_read_count": review_skill_reads,
@@ -802,6 +816,16 @@ def _grade(
         candidate_limits = (
             ("candidate_max_commands", "candidate command budget", provider.command_count),
             (
+                "candidate_max_command_rounds",
+                "candidate command-round budget",
+                provider.command_round_count,
+            ),
+            (
+                "candidate_max_model_turns",
+                "candidate model-turn budget",
+                provider.model_turn_count,
+            ),
+            (
                 "candidate_max_skill_reads",
                 "candidate skill-read budget",
                 provider.skill_read_count,
@@ -1141,6 +1165,13 @@ def _aggregate(results: list[RunResult]) -> dict[str, Any]:
                     if valid
                     else None
                 ),
+                "median_command_round_count": (
+                    statistics.median(
+                        item.provider_result.command_round_count for item in valid
+                    )
+                    if valid
+                    else None
+                ),
                 "median_model_turn_count": (
                     statistics.median(
                         item.provider_result.model_turn_count for item in valid
@@ -1206,6 +1237,7 @@ def _comparison_gates(
         uncached_plus_output_limit: float | None = None,
         cost_limit: float | None = None,
         candidate_command_limit: int | None = None,
+        candidate_command_round_limit: int | None = None,
     ) -> None:
         baseline_rows = [
             rows.get((case_id, baseline_variant)) for case_id in case_ids
@@ -1259,6 +1291,14 @@ def _comparison_gates(
             if all(row.get("median_command_count") is not None for row in candidate_rows)
             else None
         )
+        candidate_command_round_total = (
+            sum(row.get("median_command_round_count") or 0 for row in candidate_rows)
+            if all(
+                row.get("median_command_round_count") is not None
+                for row in candidate_rows
+            )
+            else None
+        )
         speed_ok = speed_ratio is not None and speed_ratio <= speed_limit
         token_ok = token_ratio is not None and token_ratio <= token_limit
         uncached_plus_output_ok = (
@@ -1278,6 +1318,12 @@ def _comparison_gates(
             else candidate_command_total is not None
             and candidate_command_total <= candidate_command_limit
         )
+        command_round_ok = (
+            True
+            if candidate_command_round_limit is None
+            else candidate_command_round_total is not None
+            and candidate_command_round_total <= candidate_command_round_limit
+        )
         gates.append(
             {
                 "case_id": name,
@@ -1290,6 +1336,7 @@ def _comparison_gates(
                     and uncached_plus_output_ok
                     and cost_ok
                     and command_ok
+                    and command_round_ok
                 ),
                 "detail": {
                     "cases": case_ids,
@@ -1309,6 +1356,9 @@ def _comparison_gates(
                     "candidate_command_total": candidate_command_total,
                     "candidate_command_limit": candidate_command_limit,
                     "candidate_command_ok": command_ok,
+                    "candidate_command_round_total": candidate_command_round_total,
+                    "candidate_command_round_limit": candidate_command_round_limit,
+                    "candidate_command_round_ok": command_round_ok,
                 },
             }
         )
@@ -1330,7 +1380,8 @@ def _comparison_gates(
             token_limit=1.10,
             uncached_plus_output_limit=1.00,
             cost_limit=1.00,
-            candidate_command_limit=30,
+            candidate_command_limit=48,
+            candidate_command_round_limit=25,
         )
         if all("current" in case["variants"] for case in workflow_cases):
             add_noninferiority_gate(
@@ -1467,7 +1518,7 @@ def _markdown_report(payload: dict[str, Any]) -> str:
             "",
             "## Efficiency trajectory",
             "",
-            "| Case | Variant | Uncached+output | Commands | Turns | Skills/review | Docs | Git | Dispatch/waits |",
+            "| Case | Variant | Uncached+output | Commands/rounds | Turns | Skills/review | Docs | Git | Dispatch/waits |",
             "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
@@ -1479,7 +1530,8 @@ def _markdown_report(payload: dict[str, Any]) -> str:
         lines.append(
             f"| {row['case_id']} | {row['variant']} | "
             f"{metric('median_uncached_plus_output_tokens')} | "
-            f"{metric('median_command_count')} | "
+            f"{metric('median_command_count')}/"
+            f"{metric('median_command_round_count')} | "
             f"{metric('median_model_turn_count')} | "
             f"{metric('median_skill_read_count')}/"
             f"{metric('median_review_skill_read_count')} | "

@@ -194,6 +194,7 @@ class EvalRunnerTests(unittest.TestCase):
                 "median_dispatch_count": dispatches,
                 "median_collaboration_wait_count": 0,
                 "median_command_count": 3,
+                "median_command_round_count": 2,
             }
 
         aggregate = {
@@ -230,6 +231,16 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertTrue(all(gate["passed"] for gate in gates))
 
         aggregate["rows"][2]["median_duration_ms"] = 116
+        gates = runner._comparison_gates(
+            cases, aggregate, enforce_performance=True
+        )
+        legacy_gate = next(
+            gate for gate in gates if gate["case_id"] == "workflow-vs-legacy"
+        )
+        self.assertFalse(legacy_gate["passed"])
+
+        aggregate["rows"][2]["median_duration_ms"] = 110
+        aggregate["rows"][2]["median_command_round_count"] = 26
         gates = runner._comparison_gates(
             cases, aggregate, enforce_performance=True
         )

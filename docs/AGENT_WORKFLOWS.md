@@ -23,9 +23,13 @@ flowchart TD
     D -- low / medium --> E
     E --> F[Stage 5: Validate — tests + evals + security + intent]
     F -- fail --> E
-    F --> G[Stage 6: Self-review via code-review]
-    G -- findings --> E
-    G --> H[Stage 7: Track + evidence-based final report]
+    F --> G{Stage 6: Full-review trigger?}
+    G -- yes --> R[Run code-review]
+    R -- findings --> E
+    R -- clean --> H
+    G -- no --> L[Lightweight diff / scope / evidence check]
+    L --> H
+    H[Stage 7: Track + evidence-based final report]
 ```
 
 The two back-edges are bounded, not infinite: see the Stage 5 retry rule below.
@@ -40,8 +44,8 @@ changes. Modes constrain *what the agent is allowed to do*, not just its tone.
 | **Architect** | Design & plan | Write SPEC/PLAN/TASKS, research, compare options | Production code | `planning` |
 | **Builder** | Implement an approved plan | Edit/create code within scope, small batches, show diffs | Scope creep, unapproved deps | — |
 | **Forensic** | Diagnose & fix a bug | Reproduce, add failing test, fix root cause, regression test | Speculative fixes, unrelated refactors | `bug-forensics` |
-| **Reviewer** | Review a change | Read, analyze, report findings (risk-ranked) | **Editing code unless asked** | `code-review` |
-| **Orchestrator** | Accelerate eligible approved TASKS via bounded parallel waves (opt-in) | Gate, schedule, brief/dispatch, integrate, validate, commit, update TASKS | Direct production edits; serial dispatch disguised as orchestration | `orchestration` |
+| **Reviewer** | Review a concrete diff/PR | Read, analyze, report findings (risk-ranked) | General project assessment; **editing code unless asked** | `code-review` |
+| **Orchestrator** | Accelerate eligible approved TASKS via bounded parallel waves (opt-in) | Gate, schedule, brief/dispatch, integrate, validate, update TASKS | Direct production edits; serial dispatch disguised as orchestration | `orchestration` |
 | **Author** | Write docs/prose | Create/update docs, README, comments | Behavior change | `docs-maintenance` |
 | **Librarian** | Organize/retrieve knowledge | Search, summarize, index, cross-link | Behavior change | — |
 | **Discussion** (default) | Refine, compare, advise | Questions, options, tradeoffs | Edits, installs, implementation |
@@ -54,29 +58,34 @@ now that the plan is approved"). Reviewer never silently turns into Builder.
   implementation / validation / maintenance). Pick a mode.
 - **Stage 1 — Context.** Load only what the request needs (`AGENTS.md` §3, Source of
   Truth). Don't preload everything; retrieve just-in-time.
+- **Fast path.** Discussion/read-only work and trivial local edits skip workflow skills,
+  review checklists, run logs, and VCS history unless independently triggered. Inspect
+  once; for a trivial write, edit once and run one combined targeted check.
 - **Stage 2 — Planning gate.** See `AGENTS.md` §6 (Planning Gate) and the `planning` skill.
 - **Stage 3 — Risk gate.** See `AGENTS.md` §7 (Risk Gate) and `docs/SECURITY.md`.
 - **Stage 4 — Implement.** Small batches (≤3–5 files); don't mix refactor and fix; don't
   weaken tests; placeholders for sensitive values.
 - **Stage 5 — Validate.** `docs/EVALS.md` for AI behavior; tests for deterministic.
+  Never repeat a passing check without a relevant code/environment change. A routine
+  local fix gets one reproduction, one post-fix targeted test, and at most one full suite
+  when its blast radius warrants it.
   Iterate until green, but **bounded**: after 2–3 failures of the *same* check, stop
   tweaking. Reflect — form a hypothesis for why the approach is wrong, re-read SPEC/PLAN;
   if the problem is at plan level, reopen the planning gate (§6) rather than patching
   symptoms. Repeated failed attempts pollute the context and degrade further tries.
-- **Stage 6 — Self-review.** `code-review` skill + `docs/CODE_REVIEW.md`. When subagents
-  are available, run the review in a **fresh-context subagent** (the `reviewer` agent, if
-  the project ships one): input is the diff + checklist + relevant SPEC/TASKS,
-  findings-only. A fresh context avoids confirming your own in-context assumptions.
+- **Stage 6 — Review.** Every write gets a lightweight final diff / scope / evidence
+  check in the current context. Load `code-review` only for an explicit review request or
+  a large/risky change listed in `AGENTS.md` §10. Use a fresh-context reviewer only for
+  orchestration, those large/risky changes, or an explicit independent-review request.
 - **Stage 7 — Track & report.** Update TASKS / MEMORY / NOTES; conditional `AGENT_RUNS.md`;
   evidence-based final report.
 
 ## Subagents: context isolation and parallel work
 
 Subagents serve two distinct purposes — isolation first, parallelism second:
-1. **Context isolation** — valid even for sequential work: a fresh-context reviewer
-   (Stage 6), or deep research whose intermediate noise shouldn't pollute the main
-   context. A subagent sees only its brief, so it reasons cleanly — this is the primary
-   value, not "multi-agent intelligence".
+1. **Context isolation** — for a triggered fresh-context review or bounded deep research
+   whose intermediate noise shouldn't pollute the main context. Do not pay this overhead
+   for routine sequential work.
 2. **Parallelism** — independent tasks executed concurrently.
 
 Prefer sequential work for small tasks. Parallelize (with subagents, when available) only
@@ -118,7 +127,8 @@ separate areas, unrelated bug fixes.
    dependencies / expected files / touched areas, fix that first or ask — don't guess.
 2. **Brief each subagent self-contained** (it starts cold, with no shared memory). Give it:
    exact task scope; files/modules likely involved; files/areas to avoid; expected output;
-   the validation command or manual check; and an explicit "no unrelated refactors".
+   one validation command or manual check; and explicit "no unrelated refactors, no
+   planning, review skill, run log, TASKS update, or commit".
 3. **Isolate writes.** Two agents must never edit the same file. For parallel file
    mutation, give each its own area (or an isolated worktree).
 4. **Return a distilled summary.** Each subagent returns ≈1–2k tokens of findings/results,
@@ -153,9 +163,10 @@ normal sequential workflow.
 
 Eligible work runs in waves of at most three executors. The coordinator dispatches every
 executor in a wave before waiting, rejects scope overlap, and runs task plus integration
-checks after the wave. Executors self-verify. One fresh-context reviewer checks the final
-integrated diff; a targeted reviewer is added only after a validation failure. The
-correction budget is one iteration.
+checks once after the wave. Executors change only owned files and run their one assigned
+check; they do not plan, review, log, update TASKS, or commit. One fresh-context reviewer
+checks the final integrated diff; a targeted reviewer is added only after a validation
+failure. The correction budget is one iteration.
 
 This structure targets wall-clock improvement and avoids promising token savings that
 the environment cannot guarantee. Role definitions may still pin models, but preflight
