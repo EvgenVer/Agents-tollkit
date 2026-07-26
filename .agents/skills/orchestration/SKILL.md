@@ -35,9 +35,12 @@ Dispatch no subagents unless all conditions hold:
 
 - at least three meaningful active tasks remain;
 - at least two tasks are ready at the same time;
-- at least two ready tasks contain substantial implementation or slow independent
-  verification; several tiny functions / wrappers / prose edits do not qualify merely
-  because they are split into separate files;
+- at least two ready tasks are executor-scale: each owns at least two non-test production
+  files, has measured independent verification taking at least 60 seconds, or has other
+  concrete evidence that it needs a substantial standalone Builder session. Estimates
+  without repository evidence do not count; when uncertain, decline;
+- several single-file functions / wrappers / prose edits do not qualify merely because
+  they are split into separate tasks;
 - at least two ready tasks have disjoint declared file scopes;
 - no selected task changes an unresolved shared API, schema, type, migration, dependency,
   security boundary, or other shared contract;

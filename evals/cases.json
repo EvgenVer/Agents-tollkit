@@ -125,22 +125,12 @@
     "suite": "orchestration",
     "smoke": true,
     "fixture": "orchestration-parallel",
-    "hidden": "orchestration-parallel",
-    "prompt": "The SPECIFICATION.md, PLAN.md, and TASKS.md are approved, and I confirm the configured default role models. Execute all active tasks with orchestration. Use real parallel subagents where the task graph allows it.",
-    "variants": ["current", "candidate"],
-    "requires_write": true,
-    "performance_gate": true,
-    "performance_baseline_case": "parallel-three-modules-sequential",
+    "prompt": "The SPECIFICATION.md, PLAN.md, and TASKS.md are approved. Run the active tasks with orchestration only if the benefit gate passes; do not fall back to sequential execution.",
+    "variants": ["candidate"],
     "grade": {
-      "min_dispatches": 2,
-      "allowed_changes": [
-        "src/csv_normalizer.py",
-        "src/json_normalizer.py",
-        "src/text_normalizer.py",
-        "tests/*",
-        "TASKS.md",
-        "AGENT_RUNS.md"
-      ]
+      "unchanged": true,
+      "max_dispatches": 0,
+      "final_contains": "ORCHESTRATION_NOT_BENEFICIAL"
     }
   },
   {
@@ -159,6 +149,47 @@
         "src/csv_normalizer.py",
         "src/json_normalizer.py",
         "src/text_normalizer.py",
+        "tests/*",
+        "TASKS.md",
+        "AGENT_RUNS.md"
+      ]
+    }
+  },
+  {
+    "id": "parallel-substantial",
+    "suite": "orchestration",
+    "smoke": false,
+    "fixture": "orchestration-substantial",
+    "hidden": "orchestration-substantial",
+    "prompt": "The SPECIFICATION.md, PLAN.md, and TASKS.md are approved. Execute all active tasks with orchestration. Use real parallel subagents where the benefit gate allows it.",
+    "variants": ["candidate"],
+    "requires_write": true,
+    "performance_gate": true,
+    "performance_baseline_case": "parallel-substantial-sequential",
+    "grade": {
+      "min_dispatches": 2,
+      "allowed_changes": [
+        "src/*",
+        "tests/*",
+        "TASKS.md",
+        "AGENT_RUNS.md"
+      ]
+    }
+  },
+  {
+    "id": "parallel-substantial-sequential",
+    "suite": "orchestration",
+    "smoke": false,
+    "fixture": "orchestration-substantial",
+    "hidden": "orchestration-substantial",
+    "prompt": "The SPECIFICATION.md, PLAN.md, and TASKS.md are approved. Execute all active tasks yourself in normal sequential Builder mode. Do not invoke orchestration or dispatch subagents.",
+    "variants": ["candidate"],
+    "enable_multi_agent": false,
+    "requires_write": true,
+    "grade": {
+      "max_dispatches": 0,
+      "allowed_changes": [
+        "src/*",
         "tests/*",
         "TASKS.md",
         "AGENT_RUNS.md"

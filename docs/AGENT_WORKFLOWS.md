@@ -161,6 +161,11 @@ actually dispatch concurrently. A failed gate returns
 `ORCHESTRATION_NOT_BENEFICIAL` before any subagent starts; the caller can then choose the
 normal sequential workflow.
 
+At least two ready tasks must be executor-scale: each owns two or more non-test
+production files, has a measured independent check of at least 60 seconds, or has other
+repository evidence that it warrants a standalone Builder session. Unknown benefit
+means decline; several single-file tasks are not a positive speed case.
+
 Eligible work runs in waves of at most three executors. The coordinator dispatches every
 executor in a wave before waiting and rejects scope overlap. Executors change only owned
 files, cover their task-relevant contract, and run one assigned check; they do not plan,

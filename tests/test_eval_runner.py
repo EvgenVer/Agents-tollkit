@@ -126,7 +126,7 @@ class EvalRunnerTests(unittest.TestCase):
         ]
         self.assertEqual(runner._dispatch_count(events), 2)
 
-    def test_full_matrix_has_81_calls_and_starts_with_reused_write_canary(
+    def test_full_matrix_has_84_calls_and_starts_with_reused_write_canary(
         self,
     ) -> None:
         cases = runner._load_cases()
@@ -137,7 +137,7 @@ class EvalRunnerTests(unittest.TestCase):
             seed=20260724,
         )
 
-        self.assertEqual(len(jobs), 81)
+        self.assertEqual(len(jobs), 84)
         self.assertEqual(
             canary,
             ("trivial-fast-path", "candidate", 1),

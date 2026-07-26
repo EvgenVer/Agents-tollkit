@@ -30,6 +30,7 @@ class EvalCaseTests(unittest.TestCase):
             "ORCHESTRATION_NOT_BENEFICIAL",
             "at least three meaningful active tasks",
             "at least two tasks are ready",
+            "at least two ready tasks are executor-scale",
             "capped at three",
             "before waiting for any result",
             "Do not dispatch a reviewer per successful task",

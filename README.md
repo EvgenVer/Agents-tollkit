@@ -103,7 +103,7 @@ candidate:
 python -m evals --provider codex --suite smoke --runs 1 --yes
 ```
 
-Run the reproducible three-pass comparison (81 provider calls) from a standalone terminal,
+Run the reproducible three-pass comparison (84 provider calls) from a standalone terminal,
 not from a nested Codex Desktop session:
 
 ```bash
