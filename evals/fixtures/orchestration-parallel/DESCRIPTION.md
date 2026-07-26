@@ -1,3 +1,4 @@
-# DESCRIPTION — Normalizer library
+# DESCRIPTION — Event normalization library
 
-A standard-library Python package with three independent input normalizers.
+A standard-library Python package with independent CSV, JSON Lines, and key-value event
+normalizers.

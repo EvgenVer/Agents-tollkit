@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from evals import runner
+
+
+class EvalRunnerTests(unittest.TestCase):
+    def test_codex_command_pins_model_reasoning_and_service_tier(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            command, _ = runner._provider_command(
+                "codex",
+                cwd=Path(temp),
+                prompt="Do the task.",
+                model="gpt-5.6-sol",
+                reasoning_effort="high",
+                service_tier="default",
+                orchestration=True,
+                max_budget_usd=None,
+            )
+
+        self.assertIn("--model", command)
+        self.assertIn("gpt-5.6-sol", command)
+        self.assertIn('approval_policy="never"', command)
+        self.assertIn('model_reasoning_effort="high"', command)
+        self.assertIn('service_tier="default"', command)
+        self.assertIn("multi_agent", command)
+
+    def test_read_only_write_block_is_an_infrastructure_failure_even_on_exit_zero(
+        self,
+    ) -> None:
+        output = "patch rejected: writing is blocked by read-only sandbox"
+        self.assertEqual(
+            runner._classify_infrastructure_failure(
+                0, output, requires_write=True
+            ),
+            "provider workspace is not writable",
+        )
+        self.assertIsNone(
+            runner._classify_infrastructure_failure(
+                0, output, requires_write=False
+            )
+        )
+
+    def test_dispatch_count_recognizes_namespaced_spawn_agent(self) -> None:
+        events = [
+            {"tool_name": "collaboration.spawn_agent"},
+            {"item": {"function": "mcp__collaboration__spawn_agent"}},
+            {"tool_name": "shell_command"},
+        ]
+        self.assertEqual(runner._dispatch_count(events), 2)
+
+    def test_full_matrix_has_75_calls_and_starts_with_reused_write_canary(
+        self,
+    ) -> None:
+        cases = runner._load_cases()
+        jobs, canary = runner._build_jobs(
+            cases,
+            ["legacy", "current", "candidate"],
+            runs=3,
+            seed=20260724,
+        )
+
+        self.assertEqual(len(jobs), 75)
+        self.assertEqual(
+            canary,
+            ("trivial-fast-path", "candidate", 1),
+        )
+        first_case, first_variant, first_repetition, _ = jobs[0]
+        self.assertEqual(
+            (first_case["id"], first_variant, first_repetition),
+            canary,
+        )
+
+    def test_noninferiority_and_parallel_speed_gates(self) -> None:
+        cases = [
+            {
+                "id": "core",
+                "suite": "workflow",
+                "variants": ["legacy", "current", "candidate"],
+            },
+            {
+                "id": "parallel",
+                "suite": "orchestration",
+                "variants": ["current", "candidate"],
+                "performance_gate": True,
+                "performance_baseline_case": "parallel-sequential",
+            },
+            {
+                "id": "parallel-sequential",
+                "suite": "orchestration",
+                "variants": ["candidate"],
+            },
+        ]
+
+        def row(
+            case_id: str,
+            variant: str,
+            *,
+            duration: int,
+            tokens: int,
+            dispatches: int = 0,
+        ) -> dict[str, object]:
+            return {
+                "case_id": case_id,
+                "variant": variant,
+                "runs": 3,
+                "valid_runs": 3,
+                "passes": 3,
+                "pass_rate": 1.0,
+                "pass_all": True,
+                "median_duration_ms": duration,
+                "median_total_tokens": tokens,
+                "median_dispatch_count": dispatches,
+            }
+
+        aggregate = {
+            "rows": [
+                row("core", "legacy", duration=100, tokens=100),
+                row("core", "current", duration=100, tokens=100),
+                row("core", "candidate", duration=110, tokens=110),
+                row(
+                    "parallel",
+                    "candidate",
+                    duration=80,
+                    tokens=140,
+                    dispatches=2,
+                ),
+                row(
+                    "parallel-sequential",
+                    "candidate",
+                    duration=100,
+                    tokens=100,
+                ),
+            ]
+        }
+
+        gates = runner._comparison_gates(
+            cases, aggregate, enforce_performance=True
+        )
+        self.assertEqual(len(gates), 3)
+        self.assertTrue(all(gate["passed"] for gate in gates))
+
+        aggregate["rows"][2]["median_duration_ms"] = 116
+        gates = runner._comparison_gates(
+            cases, aggregate, enforce_performance=True
+        )
+        legacy_gate = next(
+            gate for gate in gates if gate["case_id"] == "workflow-vs-legacy"
+        )
+        self.assertFalse(legacy_gate["passed"])
+
+
+if __name__ == "__main__":
+    unittest.main()

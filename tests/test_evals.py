@@ -135,23 +135,48 @@ class EvalCaseTests(unittest.TestCase):
         self.assertEqual(row["valid_runs"], 0)
         self.assertIsNone(row["pass_rate"])
 
-    def test_performance_gate_enforces_quality_speed_and_cost(self) -> None:
-        cases = [{"id": "parallel", "performance_gate": True}]
+    def test_performance_gate_compares_orchestration_to_sequential_control(
+        self,
+    ) -> None:
+        cases = [
+            {
+                "id": "parallel",
+                "suite": "orchestration",
+                "variants": ["current", "candidate"],
+                "performance_gate": True,
+                "performance_baseline_case": "parallel-sequential",
+            },
+            {
+                "id": "parallel-sequential",
+                "suite": "orchestration",
+                "variants": ["candidate"],
+            },
+        ]
         aggregate = {
             "rows": [
                 {
                     "case_id": "parallel",
-                    "variant": "current",
+                    "variant": "candidate",
+                    "runs": 3,
+                    "valid_runs": 3,
+                    "passes": 3,
                     "pass_rate": 1.0,
-                    "median_duration_ms": 1000,
-                    "median_cost_usd": 1.0,
+                    "pass_all": True,
+                    "median_duration_ms": 750,
+                    "median_total_tokens": 150,
+                    "median_dispatch_count": 2,
                 },
                 {
-                    "case_id": "parallel",
+                    "case_id": "parallel-sequential",
                     "variant": "candidate",
+                    "runs": 3,
+                    "valid_runs": 3,
+                    "passes": 3,
                     "pass_rate": 1.0,
-                    "median_duration_ms": 750,
-                    "median_cost_usd": 1.5,
+                    "pass_all": True,
+                    "median_duration_ms": 1000,
+                    "median_total_tokens": 100,
+                    "median_dispatch_count": 0,
                 },
             ]
         }
@@ -160,7 +185,7 @@ class EvalCaseTests(unittest.TestCase):
         )
         self.assertTrue(gates[0]["passed"])
 
-        aggregate["rows"][1]["median_duration_ms"] = 900
+        aggregate["rows"][0]["median_duration_ms"] = 900
         gates = runner._comparison_gates(
             cases, aggregate, enforce_performance=True
         )

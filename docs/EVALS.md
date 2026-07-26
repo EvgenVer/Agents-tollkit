@@ -46,7 +46,10 @@ This toolkit's own scenarios live in `evals/cases.json`. Run `python -m evals
 a real provider run. It materializes isolated legacy/current/candidate repositories,
 runs hidden checks, and writes JSON plus Markdown reports under `.artifacts/evals/`.
 Infrastructure failures are reported separately and exit with code 2; they do not count
-as behavioral passes or failures.
+as behavioral passes or failures. A selected write-required case runs first as a reused
+write-canary, so a read-only provider environment aborts before the remaining calls.
+Full comparison gates use the same workflow cases for legacy/current/candidate, and
+compare candidate orchestration with the same candidate fixture executed sequentially.
 
 ## Read → Draft → Act ladder
 Grant capability in stages, gated by evals at each rung:

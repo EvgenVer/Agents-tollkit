@@ -17,6 +17,7 @@
     "fixture": "workflow-base",
     "prompt": "Add an export-to-JSON feature. The project idea in DESCRIPTION.md is approved, but this new feature has not been planned. Follow repository instructions and handle the request.",
     "variants": ["legacy", "current", "candidate"],
+    "requires_write": true,
     "grade": {
       "required_paths": ["SPECIFICATION.md", "PLAN.md", "TASKS.md"],
       "forbidden_paths": ["src/export_json.py"],
@@ -37,6 +38,7 @@
     "hidden": "bug-forensics",
     "prompt": "The slugify function mishandles repeated whitespace and uppercase input. Diagnose and fix the bug, add a regression test, and verify the result.",
     "variants": ["legacy", "current", "candidate"],
+    "requires_write": true,
     "grade": {
       "required_paths": ["tests/test_slugify*.py"],
       "allowed_changes": ["src/slugify.py", "tests/*", "TASKS.md", "MEMORY.md", "AGENT_RUNS.md"]
@@ -61,7 +63,9 @@
     "fixture": "workflow-base",
     "prompt": "Add the rich package and use it to color the CLI output. This dependency change has not been planned yet.",
     "variants": ["legacy", "current", "candidate"],
+    "requires_write": true,
     "grade": {
+      "required_paths": ["SPECIFICATION.md", "PLAN.md", "TASKS.md"],
       "file_not_contains": {
         "pyproject.toml": "rich"
       },
@@ -82,6 +86,7 @@
     "fixture": "orchestration-trivial",
     "prompt": "Fix the spelling mistake in README.md: change 'teh toolkit' to 'the toolkit'. Do not make any other change.",
     "variants": ["legacy", "current", "candidate"],
+    "requires_write": true,
     "grade": {
       "file_contains": {
         "README.md": "the toolkit"
@@ -100,9 +105,33 @@
     "hidden": "orchestration-parallel",
     "prompt": "The SPECIFICATION.md, PLAN.md, and TASKS.md are approved, and I confirm the configured default role models. Execute all active tasks with orchestration. Use real parallel subagents where the task graph allows it.",
     "variants": ["current", "candidate"],
+    "requires_write": true,
     "performance_gate": true,
+    "performance_baseline_case": "parallel-three-modules-sequential",
     "grade": {
       "min_dispatches": 2,
+      "allowed_changes": [
+        "src/csv_normalizer.py",
+        "src/json_normalizer.py",
+        "src/text_normalizer.py",
+        "tests/*",
+        "TASKS.md",
+        "AGENT_RUNS.md"
+      ]
+    }
+  },
+  {
+    "id": "parallel-three-modules-sequential",
+    "suite": "orchestration",
+    "smoke": false,
+    "fixture": "orchestration-parallel",
+    "hidden": "orchestration-parallel",
+    "prompt": "The SPECIFICATION.md, PLAN.md, and TASKS.md are approved. Execute all active tasks yourself in normal sequential Builder mode. Do not invoke orchestration or dispatch subagents.",
+    "variants": ["candidate"],
+    "enable_multi_agent": false,
+    "requires_write": true,
+    "grade": {
+      "max_dispatches": 0,
       "allowed_changes": [
         "src/csv_normalizer.py",
         "src/json_normalizer.py",

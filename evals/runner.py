@@ -5,6 +5,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import random
 import shutil
 import statistics
 import subprocess
@@ -44,6 +45,7 @@ class ProviderResult:
     final_message: str = ""
     provider_duration_ms: int | None = None
     input_tokens: int | None = None
+    cached_input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
     model: str | None = None
@@ -295,7 +297,14 @@ def _dispatch_count(events: list[dict[str, Any]]) -> int:
         for key, value in _walk_json(event):
             if key not in {"name", "tool", "tool_name", "function"}:
                 continue
-            if isinstance(value, str) and value.lower() in tool_names:
+            if not isinstance(value, str):
+                continue
+            normalized = value.lower()
+            if (
+                normalized in tool_names
+                or normalized.endswith(".spawn_agent")
+                or normalized.endswith("__spawn_agent")
+            ):
                 count += 1
                 break
     return count
@@ -322,6 +331,8 @@ def _provider_command(
     cwd: Path,
     prompt: str,
     model: str | None,
+    reasoning_effort: str | None,
+    service_tier: str | None,
     orchestration: bool,
     max_budget_usd: float | None,
 ) -> tuple[list[str], Path | None]:
@@ -333,6 +344,8 @@ def _provider_command(
             "--json",
             "--ephemeral",
             "--ignore-user-config",
+            "-c",
+            'approval_policy="never"',
             "--sandbox",
             "workspace-write",
             "-C",
@@ -344,6 +357,12 @@ def _provider_command(
             command.extend(["--enable", "multi_agent"])
         if model:
             command.extend(["--model", model])
+        if reasoning_effort:
+            command.extend(
+                ["-c", f'model_reasoning_effort="{reasoning_effort}"']
+            )
+        if service_tier:
+            command.extend(["-c", f'service_tier="{service_tier}"'])
         command.append(prompt)
         return command, last_message
 
@@ -370,10 +389,25 @@ def _provider_command(
     raise EvalError(f"unsupported provider: {provider}")
 
 
-def _classify_infrastructure_failure(returncode: int | None, output: str) -> bool:
-    if returncode == 0:
-        return False
+def _classify_infrastructure_failure(
+    returncode: int | None,
+    output: str,
+    *,
+    requires_write: bool = False,
+) -> str | None:
     text = output.lower()
+    if requires_write:
+        write_block_markers = (
+            "writing is blocked by read-only sandbox",
+            "workspace is currently read-only",
+            "workspace is read-only",
+            "read-only filesystem access",
+            "patch rejected: writing is blocked",
+        )
+        if any(marker in text for marker in write_block_markers):
+            return "provider workspace is not writable"
+    if returncode == 0:
+        return None
     markers = (
         "authentication",
         "not logged in",
@@ -389,7 +423,9 @@ def _classify_infrastructure_failure(returncode: int | None, output: str) -> boo
         "overloaded",
         "unavailable",
     )
-    return any(marker in text for marker in markers)
+    if any(marker in text for marker in markers):
+        return "provider infrastructure failure"
+    return None
 
 
 def _run_provider(
@@ -398,7 +434,10 @@ def _run_provider(
     cwd: Path,
     prompt: str,
     model: str | None,
+    reasoning_effort: str | None,
+    service_tier: str | None,
     orchestration: bool,
+    requires_write: bool,
     timeout: int,
     max_budget_usd: float | None,
 ) -> ProviderResult:
@@ -407,6 +446,8 @@ def _run_provider(
         cwd=cwd,
         prompt=prompt,
         model=model,
+        reasoning_effort=reasoning_effort,
+        service_tier=service_tier,
         orchestration=orchestration,
         max_budget_usd=max_budget_usd,
     )
@@ -430,20 +471,25 @@ def _run_provider(
     if last_message_path and last_message_path.exists():
         final_fallback = last_message_path.read_text(encoding="utf-8", errors="replace")
 
-    infrastructure = _classify_infrastructure_failure(
-        completed.returncode, completed.stdout + "\n" + completed.stderr
+    infrastructure_reason = _classify_infrastructure_failure(
+        completed.returncode,
+        completed.stdout + "\n" + completed.stderr + "\n" + final_fallback,
+        requires_write=requires_write,
     )
     status = (
-        "success"
+        "infrastructure_failure"
+        if infrastructure_reason
+        else "success"
         if completed.returncode == 0
-        else "infrastructure_failure"
-        if infrastructure
         else "behavior_failure"
     )
 
     provider_duration = _last_numeric(events, {"duration_ms", "duration_api_ms"})
     input_tokens = _last_numeric(
         events, {"input_tokens", "inputTokens", "prompt_tokens"}
+    )
+    cached_input_tokens = _last_numeric(
+        events, {"cached_input_tokens", "cachedInputTokens", "cached_tokens"}
     )
     output_tokens = _last_numeric(
         events, {"output_tokens", "outputTokens", "completion_tokens"}
@@ -459,12 +505,18 @@ def _run_provider(
         final_message=_final_message(events, final_fallback),
         provider_duration_ms=int(provider_duration) if provider_duration is not None else None,
         input_tokens=int(input_tokens) if input_tokens is not None else None,
+        cached_input_tokens=(
+            int(cached_input_tokens) if cached_input_tokens is not None else None
+        ),
         output_tokens=int(output_tokens) if output_tokens is not None else None,
         cost_usd=float(cost) if cost is not None else None,
         model=model,
         dispatch_count=_dispatch_count(events),
         events=events,
-        error=None if completed.returncode == 0 else completed.stderr.strip(),
+        error=(
+            infrastructure_reason
+            or (completed.stderr.strip() if completed.returncode != 0 else None)
+        ),
     )
 
 
@@ -678,7 +730,12 @@ def _single_run(
             cwd=workspace,
             prompt=case["prompt"],
             model=args.model,
-            orchestration=case["suite"] == "orchestration",
+            reasoning_effort=args.reasoning_effort,
+            service_tier=args.service_tier,
+            orchestration=case.get(
+                "enable_multi_agent", case["suite"] == "orchestration"
+            ),
+            requires_write=bool(case.get("requires_write", False)),
             timeout=args.timeout,
             max_budget_usd=args.max_budget_usd,
         )
@@ -688,7 +745,12 @@ def _single_run(
                 cwd=workspace,
                 prompt=case["prompt"],
                 model=args.model,
-                orchestration=case["suite"] == "orchestration",
+                reasoning_effort=args.reasoning_effort,
+                service_tier=args.service_tier,
+                orchestration=case.get(
+                    "enable_multi_agent", case["suite"] == "orchestration"
+                ),
+                requires_write=bool(case.get("requires_write", False)),
                 timeout=args.timeout,
                 max_budget_usd=args.max_budget_usd,
             )
@@ -708,6 +770,57 @@ def _single_run(
         )
 
 
+def _build_jobs(
+    cases: list[dict[str, Any]],
+    variants: list[str],
+    runs: int,
+    seed: int,
+) -> tuple[
+    list[tuple[dict[str, Any], str, int, int]],
+    tuple[str, str, int] | None,
+]:
+    jobs: list[tuple[dict[str, Any], str, int, int]] = []
+    next_seed = seed
+    for case in cases:
+        for variant in variants:
+            if variant not in case["variants"]:
+                continue
+            for repetition in range(1, runs + 1):
+                next_seed += 1
+                jobs.append((case, variant, repetition, next_seed))
+
+    canary_index: int | None = next(
+        (
+            index
+            for index, (case, variant, repetition, _) in enumerate(jobs)
+            if case["id"] == "trivial-fast-path"
+            and variant == "candidate"
+            and repetition == 1
+        ),
+        None,
+    )
+    if canary_index is None:
+        canary_index = next(
+            (
+                index
+                for index, (case, _, repetition, _) in enumerate(jobs)
+                if case.get("requires_write") and repetition == 1
+            ),
+            None,
+        )
+
+    canary: tuple[dict[str, Any], str, int, int] | None = None
+    if canary_index is not None:
+        canary = jobs.pop(canary_index)
+    random.Random(seed).shuffle(jobs)
+    if canary is not None:
+        jobs.insert(0, canary)
+        canary_key = (canary[0]["id"], canary[1], canary[2])
+    else:
+        canary_key = None
+    return jobs, canary_key
+
+
 def _aggregate(results: list[RunResult]) -> dict[str, Any]:
     grouped: dict[tuple[str, str], list[RunResult]] = {}
     for result in results:
@@ -725,6 +838,27 @@ def _aggregate(results: list[RunResult]) -> dict[str, Any]:
             for item in valid
             if item.provider_result.cost_usd is not None
         ]
+        input_tokens = [
+            item.provider_result.input_tokens
+            for item in valid
+            if item.provider_result.input_tokens is not None
+        ]
+        cached_input_tokens = [
+            item.provider_result.cached_input_tokens
+            for item in valid
+            if item.provider_result.cached_input_tokens is not None
+        ]
+        output_tokens = [
+            item.provider_result.output_tokens
+            for item in valid
+            if item.provider_result.output_tokens is not None
+        ]
+        total_tokens = [
+            item.provider_result.input_tokens + item.provider_result.output_tokens
+            for item in valid
+            if item.provider_result.input_tokens is not None
+            and item.provider_result.output_tokens is not None
+        ]
         passes = sum(item.grade.passed for item in valid)
         rows.append(
             {
@@ -735,11 +869,29 @@ def _aggregate(results: list[RunResult]) -> dict[str, Any]:
                 "infrastructure_failures": len(items) - len(valid),
                 "passes": passes,
                 "pass_rate": passes / len(valid) if valid else None,
-                "pass_all": bool(valid) and all(item.grade.passed for item in valid),
+                "pass_all": (
+                    len(valid) == len(items)
+                    and bool(valid)
+                    and all(item.grade.passed for item in valid)
+                ),
                 "median_duration_ms": (
                     round(statistics.median(durations)) if durations else None
                 ),
                 "median_cost_usd": statistics.median(costs) if costs else None,
+                "median_input_tokens": (
+                    round(statistics.median(input_tokens)) if input_tokens else None
+                ),
+                "median_cached_input_tokens": (
+                    round(statistics.median(cached_input_tokens))
+                    if cached_input_tokens
+                    else None
+                ),
+                "median_output_tokens": (
+                    round(statistics.median(output_tokens)) if output_tokens else None
+                ),
+                "median_total_tokens": (
+                    round(statistics.median(total_tokens)) if total_tokens else None
+                ),
                 "median_dispatch_count": (
                     statistics.median(
                         item.provider_result.dispatch_count for item in valid
@@ -762,46 +914,155 @@ def _comparison_gates(
         (row["case_id"], row["variant"]): row for row in aggregate["rows"]
     }
     gates: list[dict[str, Any]] = []
+
+    if not enforce_performance:
+        return gates
+
+    def add_noninferiority_gate(
+        *,
+        name: str,
+        case_ids: list[str],
+        baseline_variant: str,
+        candidate_variant: str = "candidate",
+    ) -> None:
+        baseline_rows = [
+            rows.get((case_id, baseline_variant)) for case_id in case_ids
+        ]
+        candidate_rows = [
+            rows.get((case_id, candidate_variant)) for case_id in case_ids
+        ]
+        complete = all(baseline_rows) and all(candidate_rows)
+        if not complete:
+            gates.append(
+                {
+                    "case_id": name,
+                    "passed": False,
+                    "detail": "all baseline and candidate rows are required",
+                }
+            )
+            return
+
+        baseline_rows = [row for row in baseline_rows if row is not None]
+        candidate_rows = [row for row in candidate_rows if row is not None]
+        valid_complete = all(
+            row["valid_runs"] == row["runs"]
+            for row in baseline_rows + candidate_rows
+        )
+        candidate_pass_all = all(row["pass_all"] for row in candidate_rows)
+        quality_not_worse = all(
+            candidate["pass_rate"] is not None
+            and baseline["pass_rate"] is not None
+            and candidate["pass_rate"] >= baseline["pass_rate"]
+            for baseline, candidate in zip(baseline_rows, candidate_rows)
+        )
+
+        def summed_ratio(metric: str) -> float | None:
+            baseline_values = [row[metric] for row in baseline_rows]
+            candidate_values = [row[metric] for row in candidate_rows]
+            if any(value is None for value in baseline_values + candidate_values):
+                return None
+            baseline_total = sum(baseline_values)
+            if not baseline_total:
+                return None
+            return sum(candidate_values) / baseline_total
+
+        speed_ratio = summed_ratio("median_duration_ms")
+        token_ratio = summed_ratio("median_total_tokens")
+        speed_ok = speed_ratio is not None and speed_ratio <= 1.15
+        token_ok = token_ratio is not None and token_ratio <= 1.15
+        gates.append(
+            {
+                "case_id": name,
+                "passed": (
+                    valid_complete
+                    and candidate_pass_all
+                    and quality_not_worse
+                    and speed_ok
+                    and token_ok
+                ),
+                "detail": {
+                    "cases": case_ids,
+                    "valid_complete": valid_complete,
+                    "candidate_pass_all": candidate_pass_all,
+                    "quality_not_worse": quality_not_worse,
+                    "speed_ratio": speed_ratio,
+                    "speed_ok_at_1.15": speed_ok,
+                    "token_ratio": token_ratio,
+                    "token_ok_at_1.15": token_ok,
+                },
+            }
+        )
+
+    workflow_cases = [
+        case
+        for case in cases
+        if case["suite"] == "workflow"
+        and "legacy" in case["variants"]
+        and "candidate" in case["variants"]
+    ]
+    workflow_ids = [case["id"] for case in workflow_cases]
+    if workflow_ids:
+        add_noninferiority_gate(
+            name="workflow-vs-legacy",
+            case_ids=workflow_ids,
+            baseline_variant="legacy",
+        )
+        if all("current" in case["variants"] for case in workflow_cases):
+            add_noninferiority_gate(
+                name="workflow-vs-current",
+                case_ids=workflow_ids,
+                baseline_variant="current",
+            )
+
     for case in cases:
-        if not case.get("performance_gate") or not enforce_performance:
+        baseline_case = case.get("performance_baseline_case")
+        if not case.get("performance_gate") or not baseline_case:
             continue
-        current = rows.get((case["id"], "current"))
-        candidate = rows.get((case["id"], "candidate"))
-        if not current or not candidate:
+        orchestrated = rows.get((case["id"], "candidate"))
+        sequential = rows.get((baseline_case, "candidate"))
+        if not orchestrated or not sequential:
             gates.append(
                 {
                     "case_id": case["id"],
                     "passed": False,
-                    "detail": "current and candidate results are required",
+                    "detail": "candidate sequential and orchestrated rows are required",
                 }
             )
             continue
         speed_ratio = (
-            candidate["median_duration_ms"] / current["median_duration_ms"]
-            if current["median_duration_ms"] and candidate["median_duration_ms"]
+            orchestrated["median_duration_ms"] / sequential["median_duration_ms"]
+            if sequential["median_duration_ms"]
+            and orchestrated["median_duration_ms"]
+            else None
+        )
+        token_ratio = (
+            orchestrated["median_total_tokens"] / sequential["median_total_tokens"]
+            if sequential["median_total_tokens"]
+            and orchestrated["median_total_tokens"]
             else None
         )
         quality_ok = (
-            current["pass_rate"] is not None
-            and candidate["pass_rate"] is not None
-            and candidate["pass_rate"] >= current["pass_rate"]
+            sequential["pass_all"]
+            and orchestrated["pass_all"]
+            and orchestrated["pass_rate"] >= sequential["pass_rate"]
         )
         speed_ok = speed_ratio is not None and speed_ratio <= 0.80
-        cost_ok = True
-        if (
-            current["median_cost_usd"] is not None
-            and candidate["median_cost_usd"] is not None
-        ):
-            cost_ok = candidate["median_cost_usd"] <= current["median_cost_usd"] * 2
+        token_ok = token_ratio is not None and token_ratio <= 1.50
+        dispatch_ok = (
+            orchestrated["median_dispatch_count"] is not None
+            and orchestrated["median_dispatch_count"] >= 2
+        )
         gates.append(
             {
                 "case_id": case["id"],
-                "passed": quality_ok and speed_ok and cost_ok,
+                "passed": quality_ok and speed_ok and token_ok and dispatch_ok,
                 "detail": {
                     "quality_ok": quality_ok,
                     "speed_ratio": speed_ratio,
-                    "speed_ok": speed_ok,
-                    "cost_ok": cost_ok,
+                    "speed_ok_at_0.80": speed_ok,
+                    "token_ratio": token_ratio,
+                    "token_ok_at_1.50": token_ok,
+                    "dispatch_ok": dispatch_ok,
                 },
             }
         )
@@ -816,10 +1077,13 @@ def _markdown_report(payload: dict[str, Any]) -> str:
         f"- Provider: `{payload['provider']}`",
         f"- CLI: `{payload['provider_version']}`",
         f"- Model override: `{payload['model'] or 'provider default'}`",
+        f"- Reasoning effort: `{payload['reasoning_effort'] or 'provider default'}`",
+        f"- Service tier: `{payload['service_tier'] or 'provider default'}`",
         f"- Repetitions: {payload['runs_per_case']}",
+        f"- Write canary: `{payload['write_canary'] or 'not applicable'}`",
         "",
-        "| Case | Variant | Valid/total | Passes | Pass rate | Median ms | Median cost | Dispatches |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| Case | Variant | Valid/total | Passes | Pass rate | Median ms | Median tokens | Median cost | Dispatches |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in payload["aggregate"]["rows"]:
         cost = (
@@ -835,6 +1099,11 @@ def _markdown_report(payload: dict[str, Any]) -> str:
             if row["median_duration_ms"] is not None
             else "n/a"
         )
+        tokens = (
+            str(row["median_total_tokens"])
+            if row["median_total_tokens"] is not None
+            else "n/a"
+        )
         dispatches = (
             str(row["median_dispatch_count"])
             if row["median_dispatch_count"] is not None
@@ -843,7 +1112,7 @@ def _markdown_report(payload: dict[str, Any]) -> str:
         lines.append(
             f"| {row['case_id']} | {row['variant']} | "
             f"{row['valid_runs']}/{row['runs']} | {row['passes']} | {pass_rate} | "
-            f"{duration} | {cost} | {dispatches} |"
+            f"{duration} | {tokens} | {cost} | {dispatches} |"
         )
     if payload["comparison_gates"]:
         lines.extend(["", "## Comparison gates", ""])
@@ -901,9 +1170,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--case", action="append", help="Run only a named case.")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--release", action="store_true", help="Use five runs and enforce comparison gates.")
+    parser.add_argument(
+        "--enforce-gates",
+        action="store_true",
+        help="Enforce non-inferiority and orchestration gates with the selected run count.",
+    )
     parser.add_argument("--seed", type=int, default=20260724)
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--model")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("low", "medium", "high", "xhigh", "max", "ultra"),
+    )
+    parser.add_argument("--service-tier")
     parser.add_argument("--max-budget-usd", type=float)
     parser.add_argument("--current-ref", default=DEFAULT_CURRENT_REF)
     parser.add_argument(
@@ -950,14 +1229,22 @@ def main(argv: list[str] | None = None) -> int:
         for case in cases:
             print(f"{case['id']}\t{case['suite']}\t{','.join(case['variants'])}")
         return 0
+    if args.provider != "codex" and (
+        args.reasoning_effort is not None or args.service_tier is not None
+    ):
+        parser.error("--reasoning-effort and --service-tier are Codex-only")
+    enforce_gates = args.release or args.enforce_gates
+    if enforce_gates and args.provider == "codex" and not args.model:
+        parser.error("--model is required when comparison gates are enforced")
 
     variants = args.variant or ["legacy", "current", "candidate"]
-    base_invocations = sum(
-        1 for case in cases for variant in variants if variant in case["variants"]
-    ) * args.runs
+    jobs, canary_key = _build_jobs(cases, variants, args.runs, args.seed)
+    base_invocations = len(jobs)
     invocations = base_invocations * (2 if args.retry_infrastructure else 1)
     print(
         f"Provider={args.provider}; model={args.model or 'default'}; "
+        f"reasoning={args.reasoning_effort or 'default'}; "
+        f"tier={args.service_tier or 'default'}; "
         f"cases={len(cases)}; maximum invocations={invocations}; "
         f"per-Claude-call budget={args.max_budget_usd or 'not set'}"
     )
@@ -966,36 +1253,80 @@ def main(argv: list[str] | None = None) -> int:
 
     version = _provider_version(args.provider)
     results: list[RunResult] = []
-    for case in cases:
-        for variant in variants:
-            if variant not in case["variants"]:
-                continue
-            for repetition in range(1, args.runs + 1):
-                print(f"[{case['id']}] {variant} run {repetition}/{args.runs}", flush=True)
-                results.append(
-                    _single_run(
-                        case,
-                        variant,
-                        args.provider,
-                        repetition,
-                        args.seed + repetition,
-                        args,
-                    )
+    for case, variant, repetition, run_seed in jobs:
+        job_key = (case["id"], variant, repetition)
+        prefix = "[write-canary] " if job_key == canary_key else ""
+        print(
+            f"{prefix}[{case['id']}] {variant} "
+            f"run {repetition}/{args.runs}",
+            flush=True,
+        )
+        result = _single_run(
+            case,
+            variant,
+            args.provider,
+            repetition,
+            run_seed,
+            args,
+        )
+        results.append(result)
+        if job_key == canary_key:
+            infrastructure_blocked = (
+                result.provider_result.status == "infrastructure_failure"
+            )
+            candidate_behavior_failed = (
+                variant == "candidate" and not result.grade.passed
+            )
+            if infrastructure_blocked or candidate_behavior_failed:
+                reason = (
+                    "provider infrastructure"
+                    if infrastructure_blocked
+                    else "candidate failed the canary task"
                 )
+                print(
+                    f"Write canary failed ({reason}); stopping before the "
+                    "remaining provider calls.",
+                    flush=True,
+                )
+                break
 
     aggregate = _aggregate(results)
     gates = _comparison_gates(
-        cases, aggregate, enforce_performance=args.release
+        cases, aggregate, enforce_performance=enforce_gates
     )
+    canary_label: str | None = None
+    if canary_key is not None:
+        canary_result = next(
+            (
+                result
+                for result in results
+                if (
+                    result.case_id,
+                    result.variant,
+                    result.repetition,
+                )
+                == canary_key
+            ),
+            None,
+        )
+        if canary_result is not None:
+            canary_label = (
+                f"{canary_key[0]}/{canary_key[1]}/run-{canary_key[2]}: "
+                f"{canary_result.provider_result.status}, "
+                f"grade={'pass' if canary_result.grade.passed else 'fail'}"
+            )
     generated_at = datetime.now(timezone.utc).isoformat()
     payload = {
         "generated_at": generated_at,
         "provider": args.provider,
         "provider_version": version,
         "model": args.model,
+        "reasoning_effort": args.reasoning_effort,
+        "service_tier": args.service_tier,
         "runs_per_case": args.runs,
         "seed": args.seed,
         "current_ref": args.current_ref,
+        "write_canary": canary_label,
         "aggregate": aggregate,
         "comparison_gates": gates,
         "results": [asdict(result) for result in results],
@@ -1017,6 +1348,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     hard_failures = any(
         result.provider_result.status != "infrastructure_failure"
+        and result.variant == "candidate"
         and not result.grade.passed
         for result in results
     )

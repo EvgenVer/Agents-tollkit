@@ -99,13 +99,28 @@ candidate:
 python -m evals --provider codex --suite smoke --runs 1 --yes
 ```
 
+Run the reproducible three-pass comparison (75 provider calls) from a standalone terminal,
+not from a nested Codex Desktop session:
+
+```bash
+python -m evals --provider codex --suite all --runs 3 --enforce-gates --model gpt-5.6-sol --reasoning-effort high --service-tier default --yes
+```
+
+The first scheduled write case doubles as a write-canary. A read-only provider workspace
+or a failed trivial candidate edit stops the run immediately instead of wasting the
+remaining calls or turning blocked edits into behavioral failures.
+The enforced gates require the candidate workflow to stay within 15% of legacy/current
+for wall time and tokens while passing every run. Candidate orchestration is compared
+with the same candidate executing the same fixture sequentially; it must preserve
+quality, dispatch real parallel agents, reduce median wall time by at least 20%, and
+keep tokens within 1.5x.
+
 Use `--provider claude` for Claude Code. `--release` uses five repetitions and enforces
-the comparison gates, including the orchestration wall-clock target. Reports are written
-to `.artifacts/evals/`; provider calls are never made without explicit `--yes`. A real
-run sends the selected fixture and installed toolkit instructions to that provider, so
-review the fixtures and call bound before adding `--yes`. The pinned `current` commit
-must exist locally; fetch it in a shallow CI checkout or override it with
-`--current-ref <commit>`.
+the same gates. Reports are written to `.artifacts/evals/`; provider calls are never made
+without explicit `--yes`. A real run sends the selected fixture and installed toolkit
+instructions to that provider, so review the fixtures and call bound before adding
+`--yes`. The pinned `current` commit must exist locally; fetch it in a shallow CI checkout
+or override it with `--current-ref <commit>`.
 
 ## How the templates are used
 You don't fill these by hand. The master skeletons live in
