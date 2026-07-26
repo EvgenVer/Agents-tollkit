@@ -126,6 +126,34 @@ class EvalRunnerTests(unittest.TestCase):
         ]
         self.assertEqual(runner._dispatch_count(events), 2)
 
+    def test_collaboration_thread_failure_is_infrastructure(self) -> None:
+        self.assertEqual(
+            runner._classify_infrastructure_failure(
+                0,
+                "Parallel executor creation failed because the collaboration "
+                "environment could not resolve the active thread.",
+            ),
+            "provider collaboration infrastructure failure",
+        )
+
+    def test_build_jobs_can_select_one_repetition(self) -> None:
+        cases = [
+            {
+                "id": "case",
+                "suite": "workflow",
+                "variants": ["candidate"],
+            }
+        ]
+        jobs, _ = runner._build_jobs(
+            cases,
+            ["candidate"],
+            runs=3,
+            seed=1,
+            repetitions=[3],
+        )
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0][2], 3)
+
     def test_full_matrix_has_84_calls_and_starts_with_reused_write_canary(
         self,
     ) -> None:

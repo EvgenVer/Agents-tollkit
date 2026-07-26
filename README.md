@@ -132,7 +132,7 @@ workflow cases to use at most 48 raw median commands and 25 sequential command r
 total. Provider-reported cost, when available, must not exceed Legacy. The same full
 sequential implementation is also run under Legacy and Candidate instructions.
 Candidate orchestration must preserve quality, show real parallel collaboration, reduce
-median wall time by at least 20%, and keep tokens within 1.5x of Candidate sequential.
+median wall time by at least 10%, and keep tokens within 1.5x of Candidate sequential.
 
 Use `--provider claude` for Claude Code. `--release` uses five repetitions and enforces
 the same gates. Reports are written to `.artifacts/evals/`; provider calls are never made

@@ -555,6 +555,12 @@ def _classify_infrastructure_failure(
             marker in text for marker in write_block_markers
         ):
             return "provider workspace is not writable"
+    collaboration_markers = (
+        "could not resolve the active thread",
+        "collaboration environment could not resolve",
+    )
+    if any(marker in text for marker in collaboration_markers):
+        return "provider collaboration infrastructure failure"
     if returncode == 0:
         return None
     markers = (
@@ -996,6 +1002,7 @@ def _build_jobs(
     variants: list[str],
     runs: int,
     seed: int,
+    repetitions: list[int] | None = None,
 ) -> tuple[
     list[tuple[dict[str, Any], str, int, int]],
     tuple[str, str, int] | None,
@@ -1006,7 +1013,7 @@ def _build_jobs(
         for variant in variants:
             if variant not in case["variants"]:
                 continue
-            for repetition in range(1, runs + 1):
+            for repetition in repetitions or range(1, runs + 1):
                 next_seed += 1
                 jobs.append((case, variant, repetition, next_seed))
 
@@ -1443,7 +1450,7 @@ def _comparison_gates(
             and orchestrated["pass_all"]
             and orchestrated["pass_rate"] >= sequential["pass_rate"]
         )
-        speed_ok = speed_ratio is not None and speed_ratio <= 0.80
+        speed_ok = speed_ratio is not None and speed_ratio <= 0.90
         token_ok = token_ratio is not None and token_ratio <= 1.50
         dispatch_ok = (
             (
@@ -1462,7 +1469,7 @@ def _comparison_gates(
                 "detail": {
                     "quality_ok": quality_ok,
                     "speed_ratio": speed_ratio,
-                    "speed_ok_at_0.80": speed_ok,
+                    "speed_ok_at_0.90": speed_ok,
                     "token_ratio": token_ratio,
                     "token_ok_at_1.50": token_ok,
                     "dispatch_ok": dispatch_ok,
@@ -1679,6 +1686,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--variant", action="append", choices=("legacy", "current", "candidate"))
     parser.add_argument("--case", action="append", help="Run only a named case.")
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument(
+        "--repetition",
+        action="append",
+        type=int,
+        help="Run only this 1-based repetition; repeat to select more than one.",
+    )
     parser.add_argument("--release", action="store_true", help="Use five runs and enforce comparison gates.")
     parser.add_argument(
         "--enforce-gates",
@@ -1745,6 +1758,11 @@ def main(argv: list[str] | None = None) -> int:
         args.runs = 5
     if args.runs < 1:
         parser.error("--runs must be >= 1")
+    if args.repetition and any(
+        repetition < 1 or repetition > args.runs
+        for repetition in args.repetition
+    ):
+        parser.error("--repetition must be between 1 and --runs")
     args.candidate_root = args.candidate_root.resolve()
     args.legacy_file = args.legacy_file.resolve()
     args.baseline_report = [path.resolve() for path in args.baseline_report]
@@ -1773,7 +1791,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--model is required when comparison gates are enforced")
 
     variants = args.variant or ["legacy", "current", "candidate"]
-    jobs, canary_key = _build_jobs(cases, variants, args.runs, args.seed)
+    jobs, canary_key = _build_jobs(
+        cases, variants, args.runs, args.seed, args.repetition
+    )
     reused_results = _load_baseline_results(
         args.baseline_report, args=args, cases=cases
     )

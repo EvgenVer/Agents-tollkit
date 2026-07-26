@@ -75,6 +75,8 @@ Repeat the option to fill rows from more than one report. The runner rejects mis
 provider/model settings, run count, seed, or Current ref, recomputes trajectory metrics
 from stored events, includes a selected case's declared performance control, and lets
 fresh rows replace matching reused rows.
+Use `--repetition N` with a baseline report to replace only an infrastructure-failed
+repetition without rerunning valid rows.
 
 ## Read → Draft → Act ladder
 Grant capability in stages, gated by evals at each rung:

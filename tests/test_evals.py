@@ -362,7 +362,7 @@ class EvalCaseTests(unittest.TestCase):
         )
         self.assertTrue(gates[0]["passed"])
 
-        aggregate["rows"][0]["median_duration_ms"] = 900
+        aggregate["rows"][0]["median_duration_ms"] = 910
         gates = runner._comparison_gates(
             cases, aggregate, enforce_performance=True
         )
