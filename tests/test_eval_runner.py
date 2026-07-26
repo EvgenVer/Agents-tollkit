@@ -249,6 +249,28 @@ class EvalRunnerTests(unittest.TestCase):
         )
         self.assertFalse(legacy_gate["passed"])
 
+    def test_fresh_results_replace_reused_baseline_rows(self) -> None:
+        def result(duration: int) -> runner.RunResult:
+            return runner.RunResult(
+                case_id="case",
+                suite="workflow",
+                variant="candidate",
+                provider="codex",
+                repetition=1,
+                seed=1,
+                source_identity="source",
+                provider_result=runner.ProviderResult(
+                    status="success",
+                    exit_code=0,
+                    duration_ms=duration,
+                ),
+                grade=runner.GradeResult(passed=True, checks=[]),
+            )
+
+        merged = runner._merge_results([result(100)], [result(50)])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].provider_result.duration_ms, 50)
+
 
 if __name__ == "__main__":
     unittest.main()

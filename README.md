@@ -109,6 +109,11 @@ not from a nested Codex Desktop session:
 python -m evals --provider codex --suite all --runs 3 --enforce-gates --model gpt-5.6-sol --reasoning-effort high --service-tier default --yes
 ```
 
+When only Candidate changed, avoid rerunning stable variants by supplying their compatible
+`report.json` with repeatable `--baseline-report` and selecting
+`--variant candidate`. Compatibility requires the same provider, model settings, run
+count, seed, and pinned Current ref; fresh rows replace matching reused rows.
+
 The first scheduled write case doubles as a write-canary. A read-only provider workspace
 or a failed trivial candidate edit stops the run immediately instead of wasting the
 remaining calls or turning blocked edits into behavioral failures.

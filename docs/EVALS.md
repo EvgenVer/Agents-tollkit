@@ -69,6 +69,12 @@ six shared workflow cases. When the provider reports monetary cost, Candidate mu
 exceed Legacy. Per-case command-round, model-turn, raw-command, and skill budgets also
 catch ceremony regressions before aggregate ratios hide them.
 
+If only Candidate changed, `--baseline-report <report.json>` reuses compatible
+Legacy/Current rows while `--variant candidate` reruns the changed implementation.
+Repeat the option to fill rows from more than one report. The runner rejects mismatched
+provider/model settings, run count, seed, or Current ref, recomputes trajectory metrics
+from stored events, and lets fresh rows replace matching reused rows.
+
 ## Read → Draft → Act ladder
 Grant capability in stages, gated by evals at each rung:
 1. **Read** — the agent can only observe.

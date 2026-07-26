@@ -1582,6 +1582,85 @@ def _markdown_report(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _deserialize_run_result(raw: dict[str, Any]) -> RunResult:
+    provider_data = dict(raw["provider_result"])
+    provider_data.update(_trajectory_metrics(provider_data.get("events", [])))
+    provider_fields = ProviderResult.__dataclass_fields__
+    provider = ProviderResult(
+        **{key: value for key, value in provider_data.items() if key in provider_fields}
+    )
+    return RunResult(
+        case_id=raw["case_id"],
+        suite=raw["suite"],
+        variant=raw["variant"],
+        provider=raw["provider"],
+        repetition=int(raw["repetition"]),
+        seed=int(raw["seed"]),
+        source_identity=raw["source_identity"],
+        provider_result=provider,
+        grade=GradeResult(**raw["grade"]),
+    )
+
+
+def _load_baseline_results(
+    paths: list[Path],
+    *,
+    args: argparse.Namespace,
+    cases: list[dict[str, Any]],
+) -> list[RunResult]:
+    selected = {case["id"]: set(case["variants"]) for case in cases}
+    expected = {
+        "provider": args.provider,
+        "model": args.model,
+        "reasoning_effort": args.reasoning_effort,
+        "service_tier": args.service_tier,
+        "runs_per_case": args.runs,
+        "seed": args.seed,
+        "current_ref": args.current_ref,
+    }
+    reused: dict[tuple[str, str, int], RunResult] = {}
+    for path in paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise EvalError(f"cannot read baseline report {path}: {exc}") from exc
+        mismatches = [
+            f"{key}={payload.get(key)!r} (expected {value!r})"
+            for key, value in expected.items()
+            if payload.get(key) != value
+        ]
+        if mismatches:
+            raise EvalError(
+                f"incompatible baseline report {path}: " + "; ".join(mismatches)
+            )
+        for raw in payload.get("results", []):
+            case_id = raw.get("case_id")
+            variant = raw.get("variant")
+            repetition = raw.get("repetition")
+            if (
+                case_id not in selected
+                or variant not in selected[case_id]
+                or not isinstance(repetition, int)
+                or repetition > args.runs
+            ):
+                continue
+            result = _deserialize_run_result(raw)
+            reused.setdefault((case_id, variant, repetition), result)
+    return list(reused.values())
+
+
+def _merge_results(
+    reused: list[RunResult], fresh: list[RunResult]
+) -> list[RunResult]:
+    merged = {
+        (result.case_id, result.variant, result.repetition): result
+        for result in reused
+    }
+    for result in fresh:
+        merged[(result.case_id, result.variant, result.repetition)] = result
+    return list(merged.values())
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Compare legacy, current, and candidate toolkit behavior."
@@ -1630,6 +1709,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=ROOT / ".artifacts" / "evals",
     )
     parser.add_argument(
+        "--baseline-report",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Reuse compatible results from report.json; repeat for multiple reports. "
+            "Fresh runs replace matching case/variant/repetition rows."
+        ),
+    )
+    parser.add_argument(
         "--retry-infrastructure",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -1653,6 +1742,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--runs must be >= 1")
     args.candidate_root = args.candidate_root.resolve()
     args.legacy_file = args.legacy_file.resolve()
+    args.baseline_report = [path.resolve() for path in args.baseline_report]
     cases = [case for case in _load_cases() if _case_selected(case, args)]
     if not cases:
         raise EvalError("no eval cases selected")
@@ -1679,6 +1769,9 @@ def main(argv: list[str] | None = None) -> int:
 
     variants = args.variant or ["legacy", "current", "candidate"]
     jobs, canary_key = _build_jobs(cases, variants, args.runs, args.seed)
+    reused_results = _load_baseline_results(
+        args.baseline_report, args=args, cases=cases
+    )
     base_invocations = len(jobs)
     invocations = base_invocations * (2 if args.retry_infrastructure else 1)
     print(
@@ -1687,6 +1780,7 @@ def main(argv: list[str] | None = None) -> int:
         f"tier={args.service_tier or 'default'}; "
         f"windows-sandbox={args.windows_sandbox or 'n/a'}; "
         f"cases={len(cases)}; maximum invocations={invocations}; "
+        f"reused baseline runs={len(reused_results)}; "
         f"per-Claude-call budget={args.max_budget_usd or 'not set'}"
     )
     if not args.yes:
@@ -1731,6 +1825,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 break
 
+    fresh_results = results
+    results = _merge_results(reused_results, fresh_results)
     aggregate = _aggregate(results)
     gates = _comparison_gates(
         cases, aggregate, enforce_performance=enforce_gates
@@ -1769,6 +1865,9 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "current_ref": args.current_ref,
         "write_canary": canary_label,
+        "baseline_reports": [str(path) for path in args.baseline_report],
+        "fresh_results": len(fresh_results),
+        "reused_results": len(results) - len(fresh_results),
         "aggregate": aggregate,
         "comparison_gates": gates,
         "results": [asdict(result) for result in results],
