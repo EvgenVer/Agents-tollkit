@@ -29,6 +29,11 @@ IGNORED_SNAPSHOT_PARTS = {
     ".pytest_cache",
     "_eval_hidden",
 }
+CODEX_SESSION_ENV_KEYS = {
+    "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+    "CODEX_PERMISSION_PROFILE",
+    "CODEX_THREAD_ID",
+}
 
 
 class EvalError(RuntimeError):
@@ -333,6 +338,7 @@ def _provider_command(
     model: str | None,
     reasoning_effort: str | None,
     service_tier: str | None,
+    windows_sandbox: str | None,
     orchestration: bool,
     max_budget_usd: float | None,
 ) -> tuple[list[str], Path | None]:
@@ -363,6 +369,8 @@ def _provider_command(
             )
         if service_tier:
             command.extend(["-c", f'service_tier="{service_tier}"'])
+        if windows_sandbox:
+            command.extend(["-c", f'windows.sandbox="{windows_sandbox}"'])
         command.append(prompt)
         return command, last_message
 
@@ -389,6 +397,14 @@ def _provider_command(
     raise EvalError(f"unsupported provider: {provider}")
 
 
+def _provider_env(provider: str) -> dict[str, str]:
+    env = os.environ.copy()
+    if provider == "codex":
+        for key in CODEX_SESSION_ENV_KEYS:
+            env.pop(key, None)
+    return env
+
+
 def _classify_infrastructure_failure(
     returncode: int | None,
     output: str,
@@ -396,6 +412,12 @@ def _classify_infrastructure_failure(
     requires_write: bool = False,
 ) -> str | None:
     text = output.lower()
+    model_cli_markers = (
+        "model requires a newer version of codex",
+        "please upgrade to the latest app or cli",
+    )
+    if any(marker in text for marker in model_cli_markers):
+        return "provider model requires a newer Codex CLI"
     if requires_write:
         write_block_markers = (
             "writing is blocked by read-only sandbox",
@@ -436,6 +458,7 @@ def _run_provider(
     model: str | None,
     reasoning_effort: str | None,
     service_tier: str | None,
+    windows_sandbox: str | None,
     orchestration: bool,
     requires_write: bool,
     timeout: int,
@@ -448,12 +471,18 @@ def _run_provider(
         model=model,
         reasoning_effort=reasoning_effort,
         service_tier=service_tier,
+        windows_sandbox=windows_sandbox,
         orchestration=orchestration,
         max_budget_usd=max_budget_usd,
     )
     started = time.monotonic()
     try:
-        completed = _run(command, cwd=cwd, timeout=timeout)
+        completed = _run(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=_provider_env(provider),
+        )
     except subprocess.TimeoutExpired as exc:
         return ProviderResult(
             status="infrastructure_failure",
@@ -732,6 +761,7 @@ def _single_run(
             model=args.model,
             reasoning_effort=args.reasoning_effort,
             service_tier=args.service_tier,
+            windows_sandbox=args.windows_sandbox,
             orchestration=case.get(
                 "enable_multi_agent", case["suite"] == "orchestration"
             ),
@@ -747,6 +777,7 @@ def _single_run(
                 model=args.model,
                 reasoning_effort=args.reasoning_effort,
                 service_tier=args.service_tier,
+                windows_sandbox=args.windows_sandbox,
                 orchestration=case.get(
                     "enable_multi_agent", case["suite"] == "orchestration"
                 ),
@@ -1079,6 +1110,7 @@ def _markdown_report(payload: dict[str, Any]) -> str:
         f"- Model override: `{payload['model'] or 'provider default'}`",
         f"- Reasoning effort: `{payload['reasoning_effort'] or 'provider default'}`",
         f"- Service tier: `{payload['service_tier'] or 'provider default'}`",
+        f"- Windows sandbox: `{payload['windows_sandbox'] or 'not applicable'}`",
         f"- Repetitions: {payload['runs_per_case']}",
         f"- Write canary: `{payload['write_canary'] or 'not applicable'}`",
         "",
@@ -1183,6 +1215,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("low", "medium", "high", "xhigh", "max", "ultra"),
     )
     parser.add_argument("--service-tier")
+    parser.add_argument(
+        "--windows-sandbox",
+        choices=("elevated", "unelevated"),
+        help="Native Windows sandbox backend for Codex (defaults to elevated on Windows).",
+    )
     parser.add_argument("--max-budget-usd", type=float)
     parser.add_argument("--current-ref", default=DEFAULT_CURRENT_REF)
     parser.add_argument(
@@ -1230,9 +1267,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{case['id']}\t{case['suite']}\t{','.join(case['variants'])}")
         return 0
     if args.provider != "codex" and (
-        args.reasoning_effort is not None or args.service_tier is not None
+        args.reasoning_effort is not None
+        or args.service_tier is not None
+        or args.windows_sandbox is not None
     ):
-        parser.error("--reasoning-effort and --service-tier are Codex-only")
+        parser.error(
+            "--reasoning-effort, --service-tier, and --windows-sandbox "
+            "are Codex-only"
+        )
+    if args.provider == "codex" and os.name == "nt" and args.windows_sandbox is None:
+        args.windows_sandbox = "elevated"
     enforce_gates = args.release or args.enforce_gates
     if enforce_gates and args.provider == "codex" and not args.model:
         parser.error("--model is required when comparison gates are enforced")
@@ -1245,6 +1289,7 @@ def main(argv: list[str] | None = None) -> int:
         f"Provider={args.provider}; model={args.model or 'default'}; "
         f"reasoning={args.reasoning_effort or 'default'}; "
         f"tier={args.service_tier or 'default'}; "
+        f"windows-sandbox={args.windows_sandbox or 'n/a'}; "
         f"cases={len(cases)}; maximum invocations={invocations}; "
         f"per-Claude-call budget={args.max_budget_usd or 'not set'}"
     )
@@ -1323,6 +1368,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model,
         "reasoning_effort": args.reasoning_effort,
         "service_tier": args.service_tier,
+        "windows_sandbox": args.windows_sandbox,
         "runs_per_case": args.runs,
         "seed": args.seed,
         "current_ref": args.current_ref,

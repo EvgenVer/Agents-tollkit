@@ -109,6 +109,10 @@ python -m evals --provider codex --suite all --runs 3 --enforce-gates --model gp
 The first scheduled write case doubles as a write-canary. A read-only provider workspace
 or a failed trivial candidate edit stops the run immediately instead of wasting the
 remaining calls or turning blocked edits into behavioral failures.
+On native Windows, the runner explicitly selects the recommended `elevated` sandbox
+backend and removes inherited Codex Desktop session-policy variables from child CLI
+processes. Use `--windows-sandbox unelevated` only when elevated sandbox setup is
+unavailable.
 The enforced gates require the candidate workflow to stay within 15% of legacy/current
 for wall time and tokens while passing every run. Candidate orchestration is compared
 with the same candidate executing the same fixture sequentially; it must preserve

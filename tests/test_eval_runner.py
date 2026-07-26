@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from evals import runner
 
@@ -17,6 +18,7 @@ class EvalRunnerTests(unittest.TestCase):
                 model="gpt-5.6-sol",
                 reasoning_effort="high",
                 service_tier="default",
+                windows_sandbox="elevated",
                 orchestration=True,
                 max_budget_usd=None,
             )
@@ -26,7 +28,34 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertIn('approval_policy="never"', command)
         self.assertIn('model_reasoning_effort="high"', command)
         self.assertIn('service_tier="default"', command)
+        self.assertIn('windows.sandbox="elevated"', command)
         self.assertIn("multi_agent", command)
+
+    def test_codex_provider_drops_parent_desktop_session_environment(self) -> None:
+        with patch.dict(
+            runner.os.environ,
+            {
+                "CODEX_THREAD_ID": "thread",
+                "CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "Codex Desktop",
+                "CODEX_PERMISSION_PROFILE": ":read-only",
+                "EVAL_KEEP_ME": "yes",
+            },
+        ):
+            env = runner._provider_env("codex")
+
+        self.assertEqual(env["EVAL_KEEP_ME"], "yes")
+        for key in runner.CODEX_SESSION_ENV_KEYS:
+            self.assertNotIn(key, env)
+
+    def test_model_cli_version_mismatch_is_infrastructure(self) -> None:
+        output = (
+            "The gpt-5.6-sol model requires a newer version of Codex. "
+            "Please upgrade to the latest app or CLI and try again."
+        )
+        self.assertEqual(
+            runner._classify_infrastructure_failure(1, output),
+            "provider model requires a newer Codex CLI",
+        )
 
     def test_read_only_write_block_is_an_infrastructure_failure_even_on_exit_zero(
         self,

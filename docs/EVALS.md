@@ -48,6 +48,8 @@ runs hidden checks, and writes JSON plus Markdown reports under `.artifacts/eval
 Infrastructure failures are reported separately and exit with code 2; they do not count
 as behavioral passes or failures. A selected write-required case runs first as a reused
 write-canary, so a read-only provider environment aborts before the remaining calls.
+Native Windows provider runs default to the `elevated` sandbox backend and do not inherit
+parent Codex Desktop session-policy variables.
 Full comparison gates use the same workflow cases for legacy/current/candidate, and
 compare candidate orchestration with the same candidate fixture executed sequentially.
 
