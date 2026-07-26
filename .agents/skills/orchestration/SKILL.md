@@ -65,7 +65,7 @@ integration. It:
 - validates returned file scopes and rejects unrelated changes;
 - runs integration checks after each wave;
 - commits only when the user or repository explicitly requested it;
-- performs one final independent review of the integrated diff.
+- reviews the integrated diff against the approved contract in its current context.
 
 ## Wave algorithm
 
@@ -74,15 +74,16 @@ Repeat until no active tasks remain:
 1. Recompute tasks whose dependencies are complete.
 2. Select the maximum safe disjoint set, capped at three. If two or more eligible tasks
    are ready, never dispatch a one-task wave.
-3. Brief each executor with only its task, exact file ownership, relevant contract
-   excerpt, one verification command, and areas it must not touch. Explicitly forbid
-   planning, `code-review`, run-log/TASKS updates, commits, and unrelated validation.
+3. Brief each executor with only its task, exact file ownership, the complete
+   task-relevant contract, one verification command, and areas it must not touch.
+   Require tests for the contract's stated edge cases. Explicitly forbid planning,
+   `code-review`, run-log/TASKS updates, commits, and unrelated validation.
 4. Dispatch every executor in the wave before waiting for any result.
 5. Collect concise results: changed files, verification command and outcome, blockers.
 6. Reject scope overlap or unrelated edits. Stop the affected task rather than merging
    ambiguous ownership.
-7. Run each check once for the resulting code state, then the smallest relevant
-   integration check. Do not repeat a passing check without a relevant change.
+7. Accept clear passing executor evidence without rerunning the same targeted commands.
+   Run the smallest relevant integration check once for the resulting code state.
 8. Mark verified tasks complete; leave failed tasks blocked with evidence. Recompute the
    next ready set.
 
@@ -91,14 +92,17 @@ and its outcome. Do not dispatch a reviewer per successful task.
 
 ## Review and correction budget
 
-After all waves pass integration validation, dispatch one fresh-context reviewer for the
-complete integrated diff, relevant requirements, and `docs/CODE_REVIEW.md`.
+After all waves pass integration validation, the coordinator reviews the complete
+integrated diff against the relevant requirements and `docs/CODE_REVIEW.md` in its
+current context. Do not dispatch a fresh reviewer by default.
 
 - No findings: finish.
 - Localized finding: send only the affected task and finding to one executor, then rerun
   its check plus integration validation.
 - Integration failure: dispatch one targeted reviewer/diagnostician with the failure
   evidence and relevant diffs.
+- Dispatch an independent fresh reviewer only for large/risky orchestration or when the
+  user explicitly requests independent review.
 - Allow one correction iteration. If it still fails, stop and report the blocker. Do not
   create an open-ended executor/reviewer loop.
 

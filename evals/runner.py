@@ -1609,6 +1609,11 @@ def _load_baseline_results(
     cases: list[dict[str, Any]],
 ) -> list[RunResult]:
     selected = {case["id"]: set(case["variants"]) for case in cases}
+    catalog = {case["id"]: case for case in _load_cases()}
+    for case in cases:
+        baseline_id = case.get("performance_baseline_case")
+        if baseline_id in catalog:
+            selected[baseline_id] = set(catalog[baseline_id]["variants"])
     expected = {
         "provider": args.provider,
         "model": args.model,

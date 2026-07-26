@@ -77,7 +77,8 @@ commit ceremony; every write still gets a final diff/scope/evidence check.
 **Optional — orchestrated execution:** once SPEC/PLAN/TASKS are approved, `/orchestrate`
 (Claude Code; explicit phrase in other tools) first checks whether parallelism is useful.
 Eligible substantial work runs in dependency-ready waves of up to three disjoint,
-single-check executors, followed by integration validation and one final review. Small,
+single-check executors, followed by one integration validation and coordinator review.
+A fresh reviewer is reserved for large/risky or explicitly independent review. Small,
 sequential, overlapping, or high-risk work returns `ORCHESTRATION_NOT_BENEFICIAL`
 without dispatching subagents.
 Strictly opt-in: without the command the workflow is unchanged.

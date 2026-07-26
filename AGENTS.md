@@ -171,8 +171,8 @@ threat model: `docs/SECURITY.md`. Tool/MCP registry (allowed/denied, auth, schem
 - **Lightweight review for every write:** inspect the final diff, confirm scope, and
   check relevant validation evidence. This does not load `code-review`.
 - Run full `code-review` only when asked or for shared/public contracts, dependencies,
-  §7-sensitive boundaries, or >3 production files; use a fresh reviewer only for
-  orchestration, such a large/risky change, or an explicit independent review.
+  §7-sensitive boundaries, or >3 production files. Use a fresh reviewer only for a
+  large/risky orchestration/change or an explicit independent review.
 - **Concise evidence-based final:** changed files, checks + status, dependency changes,
   and residual risks. Do not repeat raw successful output unless asked; state failures.
 

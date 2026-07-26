@@ -73,7 +73,8 @@ If only Candidate changed, `--baseline-report <report.json>` reuses compatible
 Legacy/Current rows while `--variant candidate` reruns the changed implementation.
 Repeat the option to fill rows from more than one report. The runner rejects mismatched
 provider/model settings, run count, seed, or Current ref, recomputes trajectory metrics
-from stored events, and lets fresh rows replace matching reused rows.
+from stored events, includes a selected case's declared performance control, and lets
+fresh rows replace matching reused rows.
 
 ## Read → Draft → Act ladder
 Grant capability in stages, gated by evals at each rung:

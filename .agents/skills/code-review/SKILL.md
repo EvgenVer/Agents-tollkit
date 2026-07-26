@@ -8,8 +8,9 @@ description: Run a full findings-first review of a concrete diff/PR for correctn
 Checklist and formats live in `docs/CODE_REVIEW.md`. In Reviewer Mode: findings-first,
 risk-ranked, **no edits unless asked**.
 
-Use a fresh-context reviewer only for orchestration, a large/risky change, or an explicit
-independent-review request. Otherwise review in the current context.
+Use a fresh-context reviewer only for large/risky orchestration, another large/risky
+change, or an explicit independent-review request. Otherwise review in the current
+context.
 
 ## Procedure
 1. In one context batch, load the change, checklist, relevant SPEC/PLAN/TASKS, and only

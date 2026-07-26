@@ -76,7 +76,7 @@ now that the plan is approved"). Reviewer never silently turns into Builder.
 - **Stage 6 — Review.** Every write gets a lightweight final diff / scope / evidence
   check in the current context. Load `code-review` only for an explicit review request or
   a large/risky change listed in `AGENTS.md` §10. Use a fresh-context reviewer only for
-  orchestration, those large/risky changes, or an explicit independent-review request.
+  large/risky orchestration or another large/risky/explicit independent review.
 - **Stage 7 — Track & report.** Update TASKS / MEMORY / NOTES; conditional `AGENT_RUNS.md`;
   evidence-based final report.
 
@@ -162,11 +162,12 @@ actually dispatch concurrently. A failed gate returns
 normal sequential workflow.
 
 Eligible work runs in waves of at most three executors. The coordinator dispatches every
-executor in a wave before waiting, rejects scope overlap, and runs task plus integration
-checks once after the wave. Executors change only owned files and run their one assigned
-check; they do not plan, review, log, update TASKS, or commit. One fresh-context reviewer
-checks the final integrated diff; a targeted reviewer is added only after a validation
-failure. The correction budget is one iteration.
+executor in a wave before waiting and rejects scope overlap. Executors change only owned
+files, cover their task-relevant contract, and run one assigned check; they do not plan,
+review, log, update TASKS, or commit. The coordinator accepts passing targeted evidence,
+runs one integration check, and reviews the integrated diff itself. A fresh reviewer is
+reserved for large/risky or explicitly independent review; a targeted diagnostician is
+added after validation failure. The correction budget is one iteration.
 
 This structure targets wall-clock improvement and avoids promising token savings that
 the environment cannot guarantee. Role definitions may still pin models, but preflight

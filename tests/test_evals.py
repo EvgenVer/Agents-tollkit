@@ -33,6 +33,7 @@ class EvalCaseTests(unittest.TestCase):
             "capped at three",
             "before waiting for any result",
             "Do not dispatch a reviewer per successful task",
+            "Do not dispatch a fresh reviewer by default",
             "Allow one correction iteration",
         ):
             self.assertIn(required, text)
