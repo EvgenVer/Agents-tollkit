@@ -267,6 +267,12 @@ def _snapshot_after_provider(
         return before
 
 
+def _eval_workspace_root(artifacts: Path) -> Path:
+    root = (artifacts / "_workspaces").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _json_events(stdout: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     stripped = stdout.strip()
@@ -749,7 +755,11 @@ def _single_run(
     seed: int,
     args: argparse.Namespace,
 ) -> RunResult:
-    with tempfile.TemporaryDirectory(prefix="toolkit-eval-") as temp:
+    with tempfile.TemporaryDirectory(
+        prefix="toolkit-eval-",
+        dir=_eval_workspace_root(args.artifacts),
+        ignore_cleanup_errors=True,
+    ) as temp:
         temp_root = Path(temp)
         workspace = temp_root / "workspace"
         fixture = ROOT / "evals" / "fixtures" / case["fixture"]

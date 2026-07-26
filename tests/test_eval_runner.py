@@ -9,6 +9,17 @@ from evals import runner
 
 
 class EvalRunnerTests(unittest.TestCase):
+    def test_eval_workspaces_are_created_beneath_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            artifacts = Path(temp) / "reports"
+            workspace_root = runner._eval_workspace_root(artifacts)
+
+            self.assertEqual(
+                (artifacts / "_workspaces").resolve(),
+                workspace_root,
+            )
+            self.assertTrue(workspace_root.is_dir())
+
     def test_codex_command_pins_model_reasoning_and_service_tier(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             command, _ = runner._provider_command(
