@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 import statistics
 import subprocess
@@ -56,6 +57,13 @@ class ProviderResult:
     cost_usd: float | None = None
     model: str | None = None
     dispatch_count: int = 0
+    collaboration_wait_count: int = 0
+    command_count: int = 0
+    model_turn_count: int = 0
+    skill_read_count: int = 0
+    review_skill_read_count: int = 0
+    docs_read_count: int = 0
+    git_command_count: int = 0
     events: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
 
@@ -170,7 +178,11 @@ def _copy_path(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     _remove_path(destination)
     if source.is_dir():
-        shutil.copytree(source, destination)
+        shutil.copytree(
+            source,
+            destination,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+        )
     else:
         shutil.copy2(source, destination)
 
@@ -345,6 +357,70 @@ def _dispatch_count(events: list[dict[str, Any]]) -> int:
                 count += 1
                 break
     return count
+
+
+def _started_items(
+    events: list[dict[str, Any]], item_type: str
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for event in events
+        if event.get("type") == "item.started"
+        and isinstance((item := event.get("item")), dict)
+        and item.get("type") == item_type
+    ]
+
+
+def _collaboration_wait_count(events: list[dict[str, Any]]) -> int:
+    return sum(
+        item.get("tool") == "wait"
+        for item in _started_items(events, "collab_tool_call")
+    )
+
+
+def _trajectory_metrics(events: list[dict[str, Any]]) -> dict[str, int]:
+    commands = _started_items(events, "command_execution")
+    command_text = "\n".join(
+        item["command"] for item in commands if isinstance(item.get("command"), str)
+    )
+    model_turns = sum(
+        event.get("type") == "item.completed"
+        and isinstance(event.get("item"), dict)
+        and event["item"].get("type") == "agent_message"
+        for event in events
+    )
+    skill_reads = len(
+        re.findall(
+            r"\.agents[\\/]+skills[\\/]+[^\"']*?SKILL\.md",
+            command_text,
+            flags=re.IGNORECASE,
+        )
+    )
+    review_skill_reads = len(
+        re.findall(
+            r"\.agents[\\/]+skills[\\/]+code-review[\\/]+SKILL\.md",
+            command_text,
+            flags=re.IGNORECASE,
+        )
+    )
+    docs_reads = len(
+        re.findall(
+            r"docs[\\/]+[A-Z0-9_-]+\.md",
+            command_text,
+            flags=re.IGNORECASE,
+        )
+    )
+    git_commands = len(
+        re.findall(r"(?<![\w-])git\s+[a-z-]+", command_text, flags=re.IGNORECASE)
+    )
+    return {
+        "command_count": len(commands),
+        "model_turn_count": model_turns,
+        "skill_read_count": skill_reads,
+        "review_skill_read_count": review_skill_reads,
+        "docs_read_count": docs_reads,
+        "git_command_count": git_commands,
+    }
 
 
 def _final_message(events: list[dict[str, Any]], fallback: str) -> str:
@@ -561,6 +637,7 @@ def _run_provider(
         events, {"output_tokens", "outputTokens", "completion_tokens"}
     )
     cost = _last_numeric(events, {"total_cost_usd", "cost_usd", "costUSD"})
+    trajectory = _trajectory_metrics(events)
 
     return ProviderResult(
         status=status,
@@ -578,6 +655,8 @@ def _run_provider(
         cost_usd=float(cost) if cost is not None else None,
         model=model,
         dispatch_count=_dispatch_count(events),
+        collaboration_wait_count=_collaboration_wait_count(events),
+        **trajectory,
         events=events,
         error=(
             infrastructure_reason
@@ -598,6 +677,7 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
 
 def _grade(
     case: dict[str, Any],
+    variant: str,
     workspace: Path,
     before: dict[str, str],
     after: dict[str, str],
@@ -680,23 +760,71 @@ def _grade(
             required_final in provider.final_message,
             f"expected marker={required_final!r}",
         )
+    required_final_any = grade.get("final_contains_any", [])
+    if required_final_any:
+        final_casefold = provider.final_message.casefold()
+        _check(
+            checks,
+            "final response contains one expected marker",
+            any(marker.casefold() in final_casefold for marker in required_final_any),
+            f"expected one of={required_final_any!r}",
+        )
 
     if "min_dispatches" in grade:
         minimum = int(grade["min_dispatches"])
+        dispatch_observed = (
+            provider.dispatch_count >= minimum
+            or provider.collaboration_wait_count >= minimum
+        )
         _check(
             checks,
-            "minimum subagent dispatches",
-            provider.dispatch_count >= minimum,
-            f"actual={provider.dispatch_count}, expected>={minimum}",
+            "minimum parallel collaboration evidence",
+            dispatch_observed,
+            "direct_dispatches="
+            f"{provider.dispatch_count}, collaboration_waits="
+            f"{provider.collaboration_wait_count}, expected>={minimum}",
         )
     if "max_dispatches" in grade:
         maximum = int(grade["max_dispatches"])
+        dispatch_observed = max(
+            provider.dispatch_count, provider.collaboration_wait_count
+        )
         _check(
             checks,
-            "maximum subagent dispatches",
-            provider.dispatch_count <= maximum,
-            f"actual={provider.dispatch_count}, expected<={maximum}",
+            "maximum parallel collaboration evidence",
+            dispatch_observed <= maximum,
+            "direct_dispatches="
+            f"{provider.dispatch_count}, collaboration_waits="
+            f"{provider.collaboration_wait_count}, expected<={maximum}",
         )
+
+    if variant == "candidate":
+        candidate_limits = (
+            ("candidate_max_commands", "candidate command budget", provider.command_count),
+            (
+                "candidate_max_skill_reads",
+                "candidate skill-read budget",
+                provider.skill_read_count,
+            ),
+            (
+                "candidate_max_git_commands",
+                "candidate git-command budget",
+                provider.git_command_count,
+            ),
+        )
+        for key, name, actual in candidate_limits:
+            if key not in grade:
+                continue
+            maximum = int(grade[key])
+            _check(checks, name, actual <= maximum, f"actual={actual}, max={maximum}")
+        if "candidate_min_review_skill_reads" in grade:
+            minimum = int(grade["candidate_min_review_skill_reads"])
+            _check(
+                checks,
+                "candidate required full review",
+                provider.review_skill_read_count >= minimum,
+                f"actual={provider.review_skill_read_count}, min={minimum}",
+            )
 
     hidden_output = ""
     hidden_relative = case.get("hidden")
@@ -823,7 +951,9 @@ def _single_run(
             )
 
         after = _snapshot_after_provider(workspace, before, provider_result)
-        grade = _grade(case, workspace, before, after, provider_result)
+        grade = _grade(
+            case, variant, workspace, before, after, provider_result
+        )
         return RunResult(
             case_id=case["id"],
             suite=case["suite"],
@@ -926,6 +1056,26 @@ def _aggregate(results: list[RunResult]) -> dict[str, Any]:
             if item.provider_result.input_tokens is not None
             and item.provider_result.output_tokens is not None
         ]
+        uncached_input_tokens = [
+            max(
+                item.provider_result.input_tokens
+                - (item.provider_result.cached_input_tokens or 0),
+                0,
+            )
+            for item in valid
+            if item.provider_result.input_tokens is not None
+        ]
+        uncached_plus_output_tokens = [
+            max(
+                item.provider_result.input_tokens
+                - (item.provider_result.cached_input_tokens or 0),
+                0,
+            )
+            + item.provider_result.output_tokens
+            for item in valid
+            if item.provider_result.input_tokens is not None
+            and item.provider_result.output_tokens is not None
+        ]
         passes = sum(item.grade.passed for item in valid)
         rows.append(
             {
@@ -959,9 +1109,69 @@ def _aggregate(results: list[RunResult]) -> dict[str, Any]:
                 "median_total_tokens": (
                     round(statistics.median(total_tokens)) if total_tokens else None
                 ),
+                "median_uncached_input_tokens": (
+                    round(statistics.median(uncached_input_tokens))
+                    if uncached_input_tokens
+                    else None
+                ),
+                "median_uncached_plus_output_tokens": (
+                    round(statistics.median(uncached_plus_output_tokens))
+                    if uncached_plus_output_tokens
+                    else None
+                ),
                 "median_dispatch_count": (
                     statistics.median(
                         item.provider_result.dispatch_count for item in valid
+                    )
+                    if valid
+                    else None
+                ),
+                "median_collaboration_wait_count": (
+                    statistics.median(
+                        item.provider_result.collaboration_wait_count
+                        for item in valid
+                    )
+                    if valid
+                    else None
+                ),
+                "median_command_count": (
+                    statistics.median(
+                        item.provider_result.command_count for item in valid
+                    )
+                    if valid
+                    else None
+                ),
+                "median_model_turn_count": (
+                    statistics.median(
+                        item.provider_result.model_turn_count for item in valid
+                    )
+                    if valid
+                    else None
+                ),
+                "median_skill_read_count": (
+                    statistics.median(
+                        item.provider_result.skill_read_count for item in valid
+                    )
+                    if valid
+                    else None
+                ),
+                "median_review_skill_read_count": (
+                    statistics.median(
+                        item.provider_result.review_skill_read_count for item in valid
+                    )
+                    if valid
+                    else None
+                ),
+                "median_docs_read_count": (
+                    statistics.median(
+                        item.provider_result.docs_read_count for item in valid
+                    )
+                    if valid
+                    else None
+                ),
+                "median_git_command_count": (
+                    statistics.median(
+                        item.provider_result.git_command_count for item in valid
                     )
                     if valid
                     else None
@@ -991,6 +1201,11 @@ def _comparison_gates(
         case_ids: list[str],
         baseline_variant: str,
         candidate_variant: str = "candidate",
+        speed_limit: float = 1.15,
+        token_limit: float = 1.15,
+        uncached_plus_output_limit: float | None = None,
+        cost_limit: float | None = None,
+        candidate_command_limit: int | None = None,
     ) -> None:
         baseline_rows = [
             rows.get((case_id, baseline_variant)) for case_id in case_ids
@@ -1024,8 +1239,8 @@ def _comparison_gates(
         )
 
         def summed_ratio(metric: str) -> float | None:
-            baseline_values = [row[metric] for row in baseline_rows]
-            candidate_values = [row[metric] for row in candidate_rows]
+            baseline_values = [row.get(metric) for row in baseline_rows]
+            candidate_values = [row.get(metric) for row in candidate_rows]
             if any(value is None for value in baseline_values + candidate_values):
                 return None
             baseline_total = sum(baseline_values)
@@ -1035,8 +1250,34 @@ def _comparison_gates(
 
         speed_ratio = summed_ratio("median_duration_ms")
         token_ratio = summed_ratio("median_total_tokens")
-        speed_ok = speed_ratio is not None and speed_ratio <= 1.15
-        token_ok = token_ratio is not None and token_ratio <= 1.15
+        uncached_plus_output_ratio = summed_ratio(
+            "median_uncached_plus_output_tokens"
+        )
+        cost_ratio = summed_ratio("median_cost_usd")
+        candidate_command_total = (
+            sum(row.get("median_command_count") or 0 for row in candidate_rows)
+            if all(row.get("median_command_count") is not None for row in candidate_rows)
+            else None
+        )
+        speed_ok = speed_ratio is not None and speed_ratio <= speed_limit
+        token_ok = token_ratio is not None and token_ratio <= token_limit
+        uncached_plus_output_ok = (
+            True
+            if uncached_plus_output_limit is None
+            else uncached_plus_output_ratio is not None
+            and uncached_plus_output_ratio <= uncached_plus_output_limit
+        )
+        cost_ok = (
+            True
+            if cost_limit is None or cost_ratio is None
+            else cost_ratio <= cost_limit
+        )
+        command_ok = (
+            True
+            if candidate_command_limit is None
+            else candidate_command_total is not None
+            and candidate_command_total <= candidate_command_limit
+        )
         gates.append(
             {
                 "case_id": name,
@@ -1046,6 +1287,9 @@ def _comparison_gates(
                     and quality_not_worse
                     and speed_ok
                     and token_ok
+                    and uncached_plus_output_ok
+                    and cost_ok
+                    and command_ok
                 ),
                 "detail": {
                     "cases": case_ids,
@@ -1053,9 +1297,18 @@ def _comparison_gates(
                     "candidate_pass_all": candidate_pass_all,
                     "quality_not_worse": quality_not_worse,
                     "speed_ratio": speed_ratio,
-                    "speed_ok_at_1.15": speed_ok,
+                    f"speed_ok_at_{speed_limit:.2f}": speed_ok,
                     "token_ratio": token_ratio,
-                    "token_ok_at_1.15": token_ok,
+                    f"token_ok_at_{token_limit:.2f}": token_ok,
+                    "uncached_plus_output_ratio": uncached_plus_output_ratio,
+                    "uncached_plus_output_limit": uncached_plus_output_limit,
+                    "uncached_plus_output_ok": uncached_plus_output_ok,
+                    "cost_ratio": cost_ratio,
+                    "cost_limit": cost_limit,
+                    "cost_ok_when_reported": cost_ok,
+                    "candidate_command_total": candidate_command_total,
+                    "candidate_command_limit": candidate_command_limit,
+                    "candidate_command_ok": command_ok,
                 },
             }
         )
@@ -1073,6 +1326,11 @@ def _comparison_gates(
             name="workflow-vs-legacy",
             case_ids=workflow_ids,
             baseline_variant="legacy",
+            speed_limit=1.10,
+            token_limit=1.10,
+            uncached_plus_output_limit=1.00,
+            cost_limit=1.00,
+            candidate_command_limit=30,
         )
         if all("current" in case["variants"] for case in workflow_cases):
             add_noninferiority_gate(
@@ -1080,6 +1338,27 @@ def _comparison_gates(
                 case_ids=workflow_ids,
                 baseline_variant="current",
             )
+
+    sequential_case = next(
+        (
+            case
+            for case in cases
+            if case["id"] == "parallel-three-modules-sequential"
+            and "legacy" in case["variants"]
+            and "candidate" in case["variants"]
+        ),
+        None,
+    )
+    if sequential_case is not None:
+        add_noninferiority_gate(
+            name="sequential-implementation-vs-legacy",
+            case_ids=[sequential_case["id"]],
+            baseline_variant="legacy",
+            speed_limit=1.10,
+            token_limit=1.10,
+            uncached_plus_output_limit=1.00,
+            cost_limit=1.00,
+        )
 
     for case in cases:
         baseline_case = case.get("performance_baseline_case")
@@ -1116,8 +1395,14 @@ def _comparison_gates(
         speed_ok = speed_ratio is not None and speed_ratio <= 0.80
         token_ok = token_ratio is not None and token_ratio <= 1.50
         dispatch_ok = (
-            orchestrated["median_dispatch_count"] is not None
-            and orchestrated["median_dispatch_count"] >= 2
+            (
+                orchestrated["median_dispatch_count"] is not None
+                and orchestrated["median_dispatch_count"] >= 2
+            )
+            or (
+                orchestrated["median_collaboration_wait_count"] is not None
+                and orchestrated["median_collaboration_wait_count"] >= 2
+            )
         )
         gates.append(
             {
@@ -1150,8 +1435,8 @@ def _markdown_report(payload: dict[str, Any]) -> str:
         f"- Repetitions: {payload['runs_per_case']}",
         f"- Write canary: `{payload['write_canary'] or 'not applicable'}`",
         "",
-        "| Case | Variant | Valid/total | Passes | Pass rate | Median ms | Median tokens | Median cost | Dispatches |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Case | Variant | Valid/total | Passes | Pass rate | Median ms | Median tokens | Median cost |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in payload["aggregate"]["rows"]:
         cost = (
@@ -1172,15 +1457,36 @@ def _markdown_report(payload: dict[str, Any]) -> str:
             if row["median_total_tokens"] is not None
             else "n/a"
         )
-        dispatches = (
-            str(row["median_dispatch_count"])
-            if row["median_dispatch_count"] is not None
-            else "n/a"
-        )
         lines.append(
             f"| {row['case_id']} | {row['variant']} | "
             f"{row['valid_runs']}/{row['runs']} | {row['passes']} | {pass_rate} | "
-            f"{duration} | {tokens} | {cost} | {dispatches} |"
+            f"{duration} | {tokens} | {cost} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Efficiency trajectory",
+            "",
+            "| Case | Variant | Uncached+output | Commands | Turns | Skills/review | Docs | Git | Dispatch/waits |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in payload["aggregate"]["rows"]:
+        def metric(name: str) -> str:
+            value = row.get(name)
+            return str(value) if value is not None else "n/a"
+
+        lines.append(
+            f"| {row['case_id']} | {row['variant']} | "
+            f"{metric('median_uncached_plus_output_tokens')} | "
+            f"{metric('median_command_count')} | "
+            f"{metric('median_model_turn_count')} | "
+            f"{metric('median_skill_read_count')}/"
+            f"{metric('median_review_skill_read_count')} | "
+            f"{metric('median_docs_read_count')} | "
+            f"{metric('median_git_command_count')} | "
+            f"{metric('median_dispatch_count')}/"
+            f"{metric('median_collaboration_wait_count')} |"
         )
     if payload["comparison_gates"]:
         lines.extend(["", "## Comparison gates", ""])

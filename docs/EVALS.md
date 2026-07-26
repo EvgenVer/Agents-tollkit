@@ -55,6 +55,16 @@ directory rather than the system temporary directory, keeping them accessible to
 native sandbox with inherited project ACLs.
 Full comparison gates use the same workflow cases for legacy/current/candidate, and
 compare candidate orchestration with the same candidate fixture executed sequentially.
+The full sequential implementation also runs under Legacy instructions. Reports include
+cached and uncached token components plus trajectory metrics: commands, model turns,
+skill/review/doc reads, git commands, direct dispatch events, and collaboration waits.
+Generated Python caches are excluded from fixtures and snapshots.
+
+The Legacy non-inferiority gate requires all candidate runs to pass, aggregate median
+wall time and total tokens within 10%, uncached-input-plus-output at or below Legacy, and
+no more than 30 median commands across the six shared workflow cases. When the provider
+reports monetary cost, Candidate must not exceed Legacy. Per-case command/skill budgets
+also catch ceremony regressions before aggregate ratios hide them.
 
 ## Read → Draft → Act ladder
 Grant capability in stages, gated by evals at each rung:

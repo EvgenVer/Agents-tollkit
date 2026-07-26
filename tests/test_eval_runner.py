@@ -126,7 +126,7 @@ class EvalRunnerTests(unittest.TestCase):
         ]
         self.assertEqual(runner._dispatch_count(events), 2)
 
-    def test_full_matrix_has_75_calls_and_starts_with_reused_write_canary(
+    def test_full_matrix_has_81_calls_and_starts_with_reused_write_canary(
         self,
     ) -> None:
         cases = runner._load_cases()
@@ -137,7 +137,7 @@ class EvalRunnerTests(unittest.TestCase):
             seed=20260724,
         )
 
-        self.assertEqual(len(jobs), 75)
+        self.assertEqual(len(jobs), 81)
         self.assertEqual(
             canary,
             ("trivial-fast-path", "candidate", 1),
@@ -176,6 +176,7 @@ class EvalRunnerTests(unittest.TestCase):
             duration: int,
             tokens: int,
             dispatches: int = 0,
+            uncached_tokens: int | None = None,
         ) -> dict[str, object]:
             return {
                 "case_id": case_id,
@@ -187,14 +188,25 @@ class EvalRunnerTests(unittest.TestCase):
                 "pass_all": True,
                 "median_duration_ms": duration,
                 "median_total_tokens": tokens,
+                "median_uncached_plus_output_tokens": (
+                    uncached_tokens if uncached_tokens is not None else tokens
+                ),
                 "median_dispatch_count": dispatches,
+                "median_collaboration_wait_count": 0,
+                "median_command_count": 3,
             }
 
         aggregate = {
             "rows": [
                 row("core", "legacy", duration=100, tokens=100),
                 row("core", "current", duration=100, tokens=100),
-                row("core", "candidate", duration=110, tokens=110),
+                row(
+                    "core",
+                    "candidate",
+                    duration=110,
+                    tokens=110,
+                    uncached_tokens=100,
+                ),
                 row(
                     "parallel",
                     "candidate",

@@ -61,7 +61,9 @@ class EvalCaseTests(unittest.TestCase):
             provider = runner.ProviderResult(
                 status="success", exit_code=0, duration_ms=1
             )
-            grade = runner._grade(case, workspace, before, before, provider)
+            grade = runner._grade(
+                case, "candidate", workspace, before, before, provider
+            )
             self.assertFalse(grade.passed)
             hidden = next(
                 check for check in grade.checks if check["name"] == "hidden tests"
@@ -83,7 +85,9 @@ class EvalCaseTests(unittest.TestCase):
             provider = runner.ProviderResult(
                 status="success", exit_code=0, duration_ms=1
             )
-            grade = runner._grade(case, workspace, before, after, provider)
+            grade = runner._grade(
+                case, "candidate", workspace, before, after, provider
+            )
             self.assertFalse(grade.passed)
 
     def test_dispatch_parser_counts_only_tool_fields(self) -> None:
@@ -93,6 +97,109 @@ class EvalCaseTests(unittest.TestCase):
             {"type": "tool_use", "name": "Task"},
         ]
         self.assertEqual(runner._dispatch_count(events), 2)
+
+    def test_collaboration_waits_are_separate_parallel_evidence(self) -> None:
+        events = [
+            {
+                "type": "item.started",
+                "item": {"type": "collab_tool_call", "tool": "wait"},
+            },
+            {
+                "type": "item.completed",
+                "item": {"type": "collab_tool_call", "tool": "wait"},
+            },
+        ]
+        self.assertEqual(runner._dispatch_count(events), 0)
+        self.assertEqual(runner._collaboration_wait_count(events), 1)
+
+    def test_grade_accepts_collaboration_wait_evidence_when_spawn_is_hidden(
+        self,
+    ) -> None:
+        case = {"grade": {"min_dispatches": 2}}
+        provider = runner.ProviderResult(
+            status="success",
+            exit_code=0,
+            duration_ms=1,
+            collaboration_wait_count=2,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            grade = runner._grade(
+                case, "candidate", workspace, {}, {}, provider
+            )
+        self.assertTrue(grade.passed)
+
+    def test_candidate_efficiency_budgets_do_not_regrade_baselines(self) -> None:
+        case = {
+            "grade": {
+                "candidate_max_commands": 2,
+                "candidate_max_skill_reads": 0,
+            }
+        }
+        provider = runner.ProviderResult(
+            status="success",
+            exit_code=0,
+            duration_ms=1,
+            command_count=3,
+            skill_read_count=1,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            candidate = runner._grade(
+                case, "candidate", workspace, {}, {}, provider
+            )
+            legacy = runner._grade(
+                case, "legacy", workspace, {}, {}, provider
+            )
+        self.assertFalse(candidate.passed)
+        self.assertTrue(legacy.passed)
+
+    def test_trajectory_metrics_count_started_actions_once(self) -> None:
+        events = [
+            {
+                "type": "item.started",
+                "item": {
+                    "type": "command_execution",
+                    "command": (
+                        "Get-Content .agents/skills/code-review/SKILL.md; "
+                        "Get-Content docs/CODE_REVIEW.md; git diff"
+                    ),
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": "same completed command",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "done"},
+            },
+        ]
+        metrics = runner._trajectory_metrics(events)
+        self.assertEqual(metrics["command_count"], 1)
+        self.assertEqual(metrics["model_turn_count"], 1)
+        self.assertEqual(metrics["skill_read_count"], 1)
+        self.assertEqual(metrics["review_skill_read_count"], 1)
+        self.assertEqual(metrics["docs_read_count"], 1)
+        self.assertEqual(metrics["git_command_count"], 1)
+
+    def test_fixture_copy_ignores_generated_python_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source"
+            cache = source / "__pycache__"
+            cache.mkdir(parents=True)
+            (source / "main.py").write_text("pass\n", encoding="utf-8")
+            (cache / "main.pyc").write_bytes(b"generated")
+            target = root / "target"
+
+            runner._copy_path(source, target)
+
+            self.assertTrue((target / "main.py").exists())
+            self.assertFalse((target / "__pycache__").exists())
 
     def test_metrics_parser_uses_last_numeric_value(self) -> None:
         events = [
@@ -107,6 +214,30 @@ class EvalCaseTests(unittest.TestCase):
         self.assertEqual(runner._last_numeric(events, {"input_tokens"}), 20)
         self.assertEqual(runner._last_numeric(events, {"output_tokens"}), 4)
         self.assertEqual(runner._last_numeric(events, {"total_cost_usd"}), 0.25)
+
+    def test_aggregate_separates_cached_and_uncached_tokens(self) -> None:
+        result = runner.RunResult(
+            case_id="case",
+            suite="workflow",
+            variant="candidate",
+            provider="codex",
+            repetition=1,
+            seed=1,
+            source_identity="test",
+            provider_result=runner.ProviderResult(
+                status="success",
+                exit_code=0,
+                duration_ms=100,
+                input_tokens=100,
+                cached_input_tokens=80,
+                output_tokens=10,
+            ),
+            grade=runner.GradeResult(passed=True, checks=[]),
+        )
+        row = runner._aggregate([result])["rows"][0]
+        self.assertEqual(row["median_total_tokens"], 110)
+        self.assertEqual(row["median_uncached_input_tokens"], 20)
+        self.assertEqual(row["median_uncached_plus_output_tokens"], 30)
 
     def test_network_failure_is_infrastructure_not_behavior(self) -> None:
         self.assertTrue(
@@ -165,6 +296,7 @@ class EvalCaseTests(unittest.TestCase):
                     "median_duration_ms": 750,
                     "median_total_tokens": 150,
                     "median_dispatch_count": 2,
+                    "median_collaboration_wait_count": 0,
                 },
                 {
                     "case_id": "parallel-sequential",
@@ -177,6 +309,7 @@ class EvalCaseTests(unittest.TestCase):
                     "median_duration_ms": 1000,
                     "median_total_tokens": 100,
                     "median_dispatch_count": 0,
+                    "median_collaboration_wait_count": 0,
                 },
             ]
         }

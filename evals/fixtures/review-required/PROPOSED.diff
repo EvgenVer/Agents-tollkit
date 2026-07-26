@@ -1,0 +1,7 @@
+diff --git a/src/access.py b/src/access.py
+--- a/src/access.py
++++ b/src/access.py
+@@ -11,2 +11,2 @@
+ def can_delete_account(actor: Actor) -> bool:
+-    return actor.is_authenticated and actor.is_admin
++    return actor.is_authenticated
