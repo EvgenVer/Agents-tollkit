@@ -109,6 +109,15 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("locally modified", conflict.stdout + conflict.stderr)
             self.assertEqual((target / "AGENTS.md").read_bytes(), before_agents)
 
+            _write(target / "docs" / "POLICY.md", "policy\n")
+            authoritative = invoke(source, target, [])
+            self.assertEqual(
+                authoritative.returncode, 0, authoritative.stdout + authoritative.stderr
+            )
+            self.assertEqual(
+                (target / "AGENTS.md").read_text(encoding="utf-8"), "candidate agents v2\n"
+            )
+
     def test_powershell_lifecycle(self) -> None:
         executable = shutil.which("powershell.exe") or shutil.which("pwsh")
         if not executable:
@@ -177,13 +186,14 @@ class InstallerTests(unittest.TestCase):
             for digest in digests:
                 self.assertIn(digest, installer, name)
 
-    def test_installers_do_not_fetch_remote_content(self) -> None:
+    def test_installers_fetch_only_the_pinned_toolkit_repo(self) -> None:
         for name in ("install.ps1", "install.sh"):
             text = (ROOT / name).read_text(encoding="utf-8").lower()
-            self.assertNotIn("git clone", text, name)
-            self.assertNotIn("https://", text, name)
+            self.assertIn("git clone", text, name)
+            self.assertIn("https://github.com/", text, name)
+            self.assertIn("evgenver/agents-tollkit", text, name)
 
-    def test_legacy_migration_creates_backup(self) -> None:
+    def test_legacy_migration_is_automatic_and_creates_backup(self) -> None:
         legacy = ROOT / "AGENTS_WORKFLOW_LEGACY" / "AGENTS_v1.md"
         powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
         bash = _git_bash()
@@ -245,9 +255,7 @@ class InstallerTests(unittest.TestCase):
                 shutil.copy2(legacy, target / "AGENTS.md")
                 _write(target / "project.txt", "keep\n")
 
-                blocked = invoke(source, target, False)
-                self.assertEqual(blocked.returncode, 2, blocked.stdout + blocked.stderr)
-                migrated = invoke(source, target, True)
+                migrated = invoke(source, target, False)
                 self.assertEqual(migrated.returncode, 0, migrated.stdout + migrated.stderr)
                 backups = list(
                     (target / ".agent-toolkit-backup").glob("*/AGENTS.md")
@@ -257,6 +265,79 @@ class InstallerTests(unittest.TestCase):
                     hashlib.sha256(backups[0].read_bytes()).hexdigest(),
                     hashlib.sha256(legacy.read_bytes()).hexdigest(),
                 )
+                self.assertEqual(
+                    (target / "project.txt").read_text(encoding="utf-8"), "keep\n"
+                )
+
+    def test_previous_modular_migration_creates_backup(self) -> None:
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        bash = _git_bash()
+        if not powershell and not bash:
+            self.skipTest("no supported installer shell is available")
+
+        old_agents = subprocess.check_output(
+            ["git", "show", "59f7cbc:AGENTS.md"], cwd=ROOT
+        )
+        installers = []
+        if powershell:
+            installers.append(
+                (
+                    "powershell",
+                    lambda source, target: subprocess.run(
+                        [
+                            powershell,
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-File",
+                            str(ROOT / "install.ps1"),
+                            "-Source",
+                            str(source),
+                        ],
+                        cwd=target,
+                        text=True,
+                        capture_output=True,
+                        timeout=60,
+                        check=False,
+                    ),
+                )
+            )
+        if bash:
+            installers.append(
+                (
+                    "bash",
+                    lambda source, target: subprocess.run(
+                        [
+                            str(bash),
+                            _shell_path(ROOT / "install.sh"),
+                            "--source",
+                            _shell_path(source),
+                        ],
+                        cwd=target,
+                        text=True,
+                        capture_output=True,
+                        timeout=60,
+                        check=False,
+                    ),
+                )
+            )
+
+        for name, invoke in installers:
+            with self.subTest(installer=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source = ROOT
+                target = root / "target"
+                target.mkdir()
+                (target / "AGENTS.md").write_bytes(old_agents)
+                _write(target / "project.txt", "keep\n")
+
+                migrated = invoke(source, target)
+                self.assertEqual(migrated.returncode, 0, migrated.stdout + migrated.stderr)
+                backups = list(
+                    (target / ".agent-toolkit-backup").glob("*/AGENTS.md")
+                )
+                self.assertEqual(len(backups), 1)
+                self.assertEqual(backups[0].read_bytes(), old_agents)
                 self.assertEqual(
                     (target / "project.txt").read_text(encoding="utf-8"), "keep\n"
                 )

@@ -21,51 +21,42 @@ vet dependencies, and validate AI behavior with evals — not just tests.
 
 ## Install
 
-Clone or download the toolkit, inspect it, and run the preflight from your project
-directory. The installer deliberately does not fetch executable content. Do not pipe a
-remote script directly into a shell.
+Run the installer from the root of any project. It downloads the reviewed toolkit
+checkout from GitHub into a temporary directory, installs it, and removes that checkout
+before exiting. No toolkit checkout or installation-only files remain in the project.
 
 ```powershell
 # Windows (PowerShell)
-$toolkit = Join-Path $env:TEMP "Agents-toolkit"
-git clone --depth 1 https://github.com/EvgenVer/Agents-tollkit.git $toolkit
-Get-Content "$toolkit\install.ps1"
-& "$toolkit\install.ps1" -Source $toolkit -DryRun
-& "$toolkit\install.ps1" -Source $toolkit
+irm https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.ps1 | iex
 ```
 
 ```bash
 # macOS / Linux / Git-Bash
-toolkit="$(mktemp -d)/Agents-toolkit"
-git clone --depth 1 https://github.com/EvgenVer/Agents-tollkit.git "$toolkit"
-less "$toolkit/install.sh"
-bash "$toolkit/install.sh" --source "$toolkit" --dry-run
-bash "$toolkit/install.sh" --source "$toolkit"
+curl -fsSL https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.sh | bash
 ```
 
 The preflight prints every create/update/preserve action and aborts on conflicts before
-writing. The installer updates files it owns using `.agent-toolkit-manifest.tsv` hashes;
-it never deletes project directories, never overwrites a locally modified managed file,
-and does not run `git init`. Project documents and the project's `README.md` remain
-untouched. A locally tuned role-agent file causes a visible conflict so its model choice
-can be reconciled with updated role instructions.
+writing. The installer updates ordinary files it owns using `.agent-toolkit-manifest.tsv`
+hashes; it never deletes project directories or runs `git init`. `AGENTS.md` and
+`CLAUDE.md` are authoritative toolkit entrypoints: if they differ, the old copies are
+backed up and the new versions are applied. Project documents and the project's
+`README.md` remain untouched. A locally tuned role-agent file is preserved during
+migration and remains visible in the manifest for later reconciliation.
 
-To migrate a project that contains the exact legacy single-file toolkit:
+For a dry run, download the script to a temporary file, execute it with `-DryRun` (or
+`--dry-run`), then remove that file after inspection. The normal one-line commands above
+already clean up their temporary GitHub checkout automatically.
 
-```powershell
-& "$toolkit\install.ps1" -Source $toolkit -DryRun -MigrateLegacy
-& "$toolkit\install.ps1" -Source $toolkit -MigrateLegacy
-```
+Projects containing the exact legacy single-file toolkit are detected automatically. The
+old `AGENTS.md` and any files replaced during migration are backed up under
+`.agent-toolkit-backup/<timestamp>/`. Projects installed by the immediately previous
+modular release are migrated the same way; locally tuned role-agent files are preserved.
+If a managed file cannot be recognized safely, the installer stops before writing and
+prints the file that needs manual reconciliation.
 
-```bash
-bash "$toolkit/install.sh" --source "$toolkit" --dry-run --migrate-legacy
-bash "$toolkit/install.sh" --source "$toolkit" --migrate-legacy
-```
+The explicit `-MigrateLegacy` / `--migrate-legacy` flags remain accepted for compatibility,
+but are no longer required.
 
-The old `AGENTS.md` is backed up under `.agent-toolkit-backup/<timestamp>/`. A modified
-legacy file is treated as a conflict and must be reconciled manually. An existing modular
-installation can be adopted without changes when its files exactly match the source;
-otherwise the first manifest-based update stops instead of guessing which edits are yours.
 
 To start a project: open Claude Code or Codex here and say — *"Follow AGENTS.md. No
 DESCRIPTION yet, grill me on <your idea>, then the planning gate, and stop for approval."*

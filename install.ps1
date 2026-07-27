@@ -1,5 +1,7 @@
 # AI-Agent Workflow Toolkit - conflict-safe installer (PowerShell / Windows)
 #
+# From any target project directory (downloads the toolkit automatically):
+#   irm https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.ps1 | iex
 # Run a downloaded/local script from the target project directory:
 #   .\install.ps1 -DryRun
 #   .\install.ps1
@@ -13,11 +15,18 @@ param(
   [string]$Source
 )
 
+$REPO = "EvgenVer/Agents-tollkit"
+$BRANCH = "master"
+$PREVIOUS_COMMIT = "59f7cbc"
 $MANIFEST_NAME = ".agent-toolkit-manifest.tsv"
 $MANIFEST_HEADER = "# agent-toolkit-manifest-v1"
 $LEGACY_AGENTS_SHA256 = @(
   "1b46470215f747767736d7bac454ae621d0a161f0d315bf652ac5b71ee340606",
   "1af36a2126fca6f13941cd48854f1855b63e4deb052b4692c7e6b1a7ce9a1662"
+)
+$PREVIOUS_AGENTS_SHA256 = @(
+  "a336b1c2bdd75dc2aa855d5e2751044a001ca3298273ffd24121605ea3cad392",
+  "77b421d1e450bfe691705cc17877a5f63b32d4cac5eb8da17c92522af2e6df58"
 )
 $GITIGNORE_MARKER = "# Secrets / env (from AI-Agent toolkit)"
 
@@ -29,6 +38,14 @@ if ((Get-Item -LiteralPath $Dest -Force).Attributes -band [System.IO.FileAttribu
 
 function Get-Sha256([string]$Path) {
   return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+}
+
+function Get-NormalizedSha256([string]$Path) {
+  $text = [System.IO.File]::ReadAllText($Path)
+  $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+  $digest = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+  return ([System.BitConverter]::ToString($digest) -replace "-", "").ToLowerInvariant()
 }
 
 function Get-RelativeFile([string]$Root, [string]$FullName) {
@@ -84,10 +101,16 @@ try {
     $Src = (Resolve-Path -LiteralPath $Source).Path
   } elseif ($env:TK_SRC) {
     $Src = (Resolve-Path -LiteralPath $env:TK_SRC).Path
-  } elseif (Test-Path -LiteralPath (Join-Path $PSScriptRoot "AGENTS.md") -PathType Leaf) {
+  } elseif ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot "AGENTS.md") -PathType Leaf)) {
     $Src = (Resolve-Path -LiteralPath $PSScriptRoot).Path
   } else {
-    throw "toolkit source not found; run this script from a reviewed toolkit checkout or pass -Source"
+    $TempRoot = Join-Path $env:TEMP ("agent-toolkit-" + [guid]::NewGuid().ToString("N"))
+    $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    $cloneLog = git clone --depth 32 --branch $BRANCH "https://github.com/$REPO.git" $TempRoot --quiet 2>&1
+    $cloneExit = $LASTEXITCODE
+    $ErrorActionPreference = $eap
+    if ($cloneExit -ne 0) { throw "clone failed ($cloneExit) - check GitHub access and that git is installed.`n$cloneLog" }
+    $Src = (Resolve-Path -LiteralPath $TempRoot).Path
   }
   Write-Host "Source: $Src"
 
@@ -116,6 +139,7 @@ try {
 
   $ManifestPath = Join-Path $Dest $MANIFEST_NAME
   $OldHashes = @{}
+  $PreviousModular = $false
   if (Test-Path -LiteralPath $ManifestPath) {
     if ((Get-Item -LiteralPath $ManifestPath -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
       throw "$MANIFEST_NAME must not be a symbolic link"
@@ -135,6 +159,24 @@ try {
       }
       $OldHashes[$parts[0]] = $parts[1].ToLowerInvariant()
     }
+  } elseif (Test-Path -LiteralPath (Join-Path $Dest "AGENTS.md") -PathType Leaf) {
+    $previousAgentsHash = Get-Sha256 (Join-Path $Dest "AGENTS.md")
+    $PreviousModular = $previousAgentsHash -in $PREVIOUS_AGENTS_SHA256
+  }
+  $PreviousRoot = $null
+  if ($PreviousModular -and (Test-Path -LiteralPath (Join-Path $Src ".git") -PathType Container)) {
+    if (-not $TempRoot) {
+      $TempRoot = Join-Path $env:TEMP ("agent-toolkit-" + [guid]::NewGuid().ToString("N"))
+    }
+    $PreviousRoot = Join-Path $TempRoot "previous"
+    New-Item -ItemType Directory -Force -Path $PreviousRoot | Out-Null
+    $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    $archivePath = Join-Path $TempRoot "previous.tar"
+    git -C $Src archive --format=tar -o $archivePath $PREVIOUS_COMMIT 2>$null
+    tar -xf $archivePath -C $PreviousRoot 2>$null
+    $archiveExit = $LASTEXITCODE
+    $ErrorActionPreference = $eap
+    if ($archiveExit -ne 0) { $PreviousRoot = $null }
   }
 
   $Plan = [System.Collections.Generic.List[object]]::new()
@@ -158,11 +200,23 @@ try {
       continue
     } else {
       $targetHash = Get-Sha256 $target
-      if ($item.Rel -eq "AGENTS.md" -and $targetHash -in $LEGACY_AGENTS_SHA256) {
-        if ($MigrateLegacy) {
-          $action = "MIGRATE_LEGACY"
+      if ($item.Rel -in @("AGENTS.md", "CLAUDE.md")) {
+        $action = if ($targetHash -eq $sourceHash) { "UNCHANGED" } else { "REPLACE_AUTHORITATIVE" }
+      } elseif ($item.Rel -eq "AGENTS.md" -and $targetHash -in $LEGACY_AGENTS_SHA256) {
+        $action = "MIGRATE_LEGACY"
+      } elseif ($PreviousModular) {
+        if ($item.Rel -like ".claude/agents/*" -or $item.Rel -like ".codex/agents/*") {
+          $action = "PRESERVE_PREVIOUS"
+        } elseif ($PreviousRoot -and (Test-Path -LiteralPath (Join-Path $PreviousRoot $item.Rel) -PathType Leaf)) {
+          $previousHash = Get-NormalizedSha256 (Join-Path $PreviousRoot $item.Rel)
+          $targetNormalizedHash = Get-NormalizedSha256 $target
+          if ($targetNormalizedHash -ne $previousHash) {
+            $Conflicts.Add("$($item.Rel): locally modified since the previous release") | Out-Null
+            continue
+          }
+          $action = "MIGRATE_PREVIOUS"
         } else {
-          $Conflicts.Add("AGENTS.md: exact legacy toolkit detected; rerun with -MigrateLegacy") | Out-Null
+          $Conflicts.Add("$($item.Rel): cannot verify previous-release ownership") | Out-Null
           continue
         }
       } elseif ($OldHashes.ContainsKey($item.Rel)) {
@@ -182,7 +236,7 @@ try {
       Action = $action
       Source = $item.Source
       Rel = $item.Rel
-      Hash = $sourceHash
+      Hash = if ($action -eq "PRESERVE_PREVIOUS") { $targetHash } else { $sourceHash }
       Target = $target
     }) | Out-Null
   }
@@ -210,16 +264,20 @@ try {
     exit 0
   }
 
-  $migrations = @($Plan | Where-Object Action -eq "MIGRATE_LEGACY")
+  $migrations = @($Plan | Where-Object Action -in @("REPLACE_AUTHORITATIVE", "MIGRATE_LEGACY", "MIGRATE_PREVIOUS"))
   if ($migrations.Count -gt 0) {
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $backupDir = Join-Path $Dest ".agent-toolkit-backup\$stamp"
     New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
-    Copy-Item -LiteralPath $migrations[0].Target -Destination (Join-Path $backupDir "AGENTS.md")
-    Write-Host "Legacy backup: $backupDir"
+    foreach ($item in $migrations | Where-Object { Test-Path -LiteralPath $_.Target -PathType Leaf }) {
+      $backupTarget = Join-Path $backupDir ($item.Rel.Replace("/", "\"))
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backupTarget) | Out-Null
+      Copy-Item -LiteralPath $item.Target -Destination $backupTarget
+    }
+    Write-Host "Previous toolkit backup: $backupDir"
   }
 
-  foreach ($item in $Plan | Where-Object { $_.Action -in @("CREATE", "UPDATE", "MIGRATE_LEGACY") }) {
+  foreach ($item in $Plan | Where-Object { $_.Action -in @("CREATE", "UPDATE", "REPLACE_AUTHORITATIVE", "MIGRATE_LEGACY", "MIGRATE_PREVIOUS") }) {
     $parent = Split-Path -Parent $item.Target
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     Copy-Item -LiteralPath $item.Source -Destination $item.Target -Force
@@ -268,4 +326,9 @@ try {
 catch {
   Write-Error $_
   exit 1
+}
+finally {
+  if ($TempRoot -and (Test-Path -LiteralPath $TempRoot)) {
+    Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }

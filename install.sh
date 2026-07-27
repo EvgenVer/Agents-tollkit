@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AI-Agent Workflow Toolkit - conflict-safe installer (macOS / Linux / Git-Bash)
 #
+# From any target project directory (downloads the toolkit automatically):
+#   curl -fsSL https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.sh | bash
 # Run a downloaded/local script from the target project directory:
 #   bash install.sh --dry-run
 #   bash install.sh
@@ -8,10 +10,15 @@
 #   bash install.sh --source /path/to/toolkit
 set -euo pipefail
 
+REPO="EvgenVer/Agents-tollkit"
+BRANCH="master"
+PREVIOUS_COMMIT="59f7cbc"
 MANIFEST_NAME=".agent-toolkit-manifest.tsv"
 MANIFEST_HEADER="# agent-toolkit-manifest-v1"
 LEGACY_AGENTS_SHA256_LF="1b46470215f747767736d7bac454ae621d0a161f0d315bf652ac5b71ee340606"
 LEGACY_AGENTS_SHA256_CRLF="1af36a2126fca6f13941cd48854f1855b63e4deb052b4692c7e6b1a7ce9a1662"
+PREVIOUS_AGENTS_SHA256_LF="a336b1c2bdd75dc2aa855d5e2751044a001ca3298273ffd24121605ea3cad392"
+PREVIOUS_AGENTS_SHA256_CRLF="77b421d1e450bfe691705cc17877a5f63b32d4cac5eb8da17c92522af2e6df58"
 GITIGNORE_MARKER="# Secrets / env (from AI-Agent toolkit)"
 
 DRY_RUN=0
@@ -58,6 +65,19 @@ sha256_file() {
   fi
 }
 
+sha256_normalized_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    tr -d '\r' <"$1" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    tr -d '\r' <"$1" | shasum -a 256 | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    tr -d '\r' <"$1" | openssl dgst -sha256 | awk '{print $NF}'
+  else
+    echo "ERROR: sha256sum, shasum, or openssl is required" >&2
+    exit 1
+  fi
+}
+
 if [ -n "$SOURCE_ARG" ]; then
   SRC="$(cd "$SOURCE_ARG" && pwd -P)"
 elif [ -n "${TK_SRC:-}" ]; then
@@ -65,8 +85,10 @@ elif [ -n "${TK_SRC:-}" ]; then
 elif [ -f "$SCRIPT_DIR/AGENTS.md" ]; then
   SRC="$SCRIPT_DIR"
 else
-  echo "ERROR: toolkit source not found; run this script from a reviewed toolkit checkout or pass --source." >&2
-  exit 1
+  echo "Fetching toolkit from https://github.com/$REPO ($BRANCH) ..."
+  git clone --depth 32 --branch "$BRANCH" "https://github.com/$REPO.git" "$TMP/source" >/dev/null 2>&1 \
+    || { echo "ERROR: clone failed - check GitHub access and that git is installed." >&2; exit 1; }
+  SRC="$TMP/source"
 fi
 
 echo "AI-Agent Workflow Toolkit preflight: $DEST"
@@ -116,6 +138,7 @@ if [ -n "$duplicates" ]; then
 fi
 
 MANIFEST="$DEST/$MANIFEST_NAME"
+PREVIOUS_MODULAR=0
 if [ -L "$MANIFEST" ]; then
   echo "$MANIFEST_NAME: symbolic links are not supported" >>"$CONFLICTS"
 elif [ -e "$MANIFEST" ]; then
@@ -134,6 +157,20 @@ elif [ -e "$MANIFEST" ]; then
       [ -z "${manifest_extra:-}" ] || echo "$MANIFEST_NAME: invalid entry for $manifest_rel" >>"$CONFLICTS"
     done < <(tail -n +2 "$MANIFEST")
   fi
+fi
+if [ ! -e "$MANIFEST" ] && [ -f "$DEST/AGENTS.md" ]; then
+  previous_agents_hash="$(sha256_file "$DEST/AGENTS.md")"
+  if [ "$previous_agents_hash" = "$PREVIOUS_AGENTS_SHA256_LF" ] ||
+    [ "$previous_agents_hash" = "$PREVIOUS_AGENTS_SHA256_CRLF" ]; then
+    PREVIOUS_MODULAR=1
+  fi
+fi
+PREVIOUS_ROOT=""
+if [ "$PREVIOUS_MODULAR" -eq 1 ] && [ -d "$SRC/.git" ] &&
+  git -C "$SRC" cat-file -e "$PREVIOUS_COMMIT^{commit}" >/dev/null 2>&1; then
+  PREVIOUS_ROOT="$TMP/previous"
+  mkdir -p "$PREVIOUS_ROOT"
+  git -C "$SRC" archive "$PREVIOUS_COMMIT" | tar -xf - -C "$PREVIOUS_ROOT" || PREVIOUS_ROOT=""
 fi
 
 lookup_old_hash() {
@@ -186,14 +223,30 @@ while IFS=$'\t' read -r source_file rel; do
     target_hash="$(sha256_file "$target")"
     lookup_old_hash "$rel"
     old_hash="$OLD_HASH_RESULT"
-    if [ "$rel" = "AGENTS.md" ] &&
+    if [ "$rel" = "AGENTS.md" ] || [ "$rel" = "CLAUDE.md" ]; then
+      if [ "$target_hash" = "$source_hash" ]; then
+        action="UNCHANGED"
+      else
+        action="REPLACE_AUTHORITATIVE"
+      fi
+    elif [ "$rel" = "AGENTS.md" ] &&
       { [ "$target_hash" = "$LEGACY_AGENTS_SHA256_LF" ] ||
         [ "$target_hash" = "$LEGACY_AGENTS_SHA256_CRLF" ]; }
     then
-      if [ "$MIGRATE_LEGACY" -eq 1 ]; then
-        action="MIGRATE_LEGACY"
+      action="MIGRATE_LEGACY"
+    elif [ "$PREVIOUS_MODULAR" -eq 1 ]; then
+      if [[ "$rel" == .claude/agents/* || "$rel" == .codex/agents/* ]]; then
+        action="PRESERVE_PREVIOUS"
+      elif [ -n "$PREVIOUS_ROOT" ] && [ -f "$PREVIOUS_ROOT/$rel" ]; then
+        previous_hash="$(sha256_normalized_file "$PREVIOUS_ROOT/$rel")"
+        target_normalized_hash="$(sha256_normalized_file "$target")"
+        if [ "$target_normalized_hash" != "$previous_hash" ]; then
+          echo "$rel: locally modified since the previous release" >>"$CONFLICTS"
+          continue
+        fi
+        action="MIGRATE_PREVIOUS"
       else
-        echo "AGENTS.md: exact legacy toolkit detected; rerun with --migrate-legacy" >>"$CONFLICTS"
+        echo "$rel: cannot verify previous-release ownership" >>"$CONFLICTS"
         continue
       fi
     elif [ -n "$old_hash" ]; then
@@ -212,7 +265,9 @@ while IFS=$'\t' read -r source_file rel; do
       continue
     fi
   fi
-  printf '%s\t%s\t%s\t%s\n' "$action" "$source_file" "$rel" "$source_hash" >>"$PLAN"
+  manifest_hash="$source_hash"
+  [ "$action" = "PRESERVE_PREVIOUS" ] && manifest_hash="$target_hash"
+  printf '%s\t%s\t%s\t%s\n' "$action" "$source_file" "$rel" "$manifest_hash" >>"$PLAN"
 done <"$PAIRS"
 
 GITIGNORE="$DEST/.gitignore"
@@ -242,17 +297,27 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-if grep -q '^MIGRATE_LEGACY	' "$PLAN"; then
+if grep -qE $'^(REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS)\t' "$PLAN"; then
   stamp="$(date +%Y%m%d-%H%M%S)"
   backup_dir="$DEST/.agent-toolkit-backup/$stamp"
   mkdir -p "$backup_dir"
-  cp "$DEST/AGENTS.md" "$backup_dir/AGENTS.md"
-  echo "Legacy backup: $backup_dir"
+  while IFS=$'\t' read -r action source_file rel manifest_hash; do
+    case "$action" in
+      REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS)
+        target="$DEST/$rel"
+        if [ -f "$target" ]; then
+          mkdir -p "$backup_dir/$(dirname "$rel")"
+          cp "$target" "$backup_dir/$rel"
+        fi
+        ;;
+    esac
+  done <"$PLAN"
+  echo "Previous toolkit backup: $backup_dir"
 fi
 
 while IFS=$'\t' read -r action source_file rel source_hash; do
   case "$action" in
-    CREATE|UPDATE|MIGRATE_LEGACY)
+    CREATE|UPDATE|REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS)
       target="$DEST/$rel"
       mkdir -p "${target%/*}"
       cp "$source_file" "$target"
