@@ -198,6 +198,20 @@ try {
     }
     $PreviousModular = $previousMatches -ge 3
   }
+  $UnverifiedModular = $false
+  if ($NoManifest -and -not $PreviousModular) {
+    $existingManagedCount = 0
+    $existingManagedRoots = @{}
+    foreach ($item in $Managed) {
+      $target = Convert-ToTargetPath $item.Rel
+      if (Test-Path -LiteralPath $target -PathType Leaf) {
+        $existingManagedCount++
+        $rootName = ($item.Rel -split "/", 2)[0]
+        $existingManagedRoots[$rootName] = $true
+      }
+    }
+    $UnverifiedModular = $existingManagedCount -ge 5 -and $existingManagedRoots.Count -ge 3
+  }
 
   $Plan = [System.Collections.Generic.List[object]]::new()
   $Conflicts = [System.Collections.Generic.List[string]]::new()
@@ -246,6 +260,12 @@ try {
           }
           $action = "MIGRATE_PREVIOUS"
         }
+      } elseif ($UnverifiedModular) {
+        if ($item.Rel -like ".claude/agents/*" -or $item.Rel -like ".codex/agents/*") {
+          $action = "PRESERVE_UNVERIFIED"
+        } else {
+          $action = "REPLACE_UNVERIFIED"
+        }
       } elseif ($OldHashes.ContainsKey($item.Rel)) {
         if ($targetHash -ne $OldHashes[$item.Rel]) {
           $Conflicts.Add("$($item.Rel): locally modified since the previous install") | Out-Null
@@ -263,7 +283,7 @@ try {
       Action = $action
       Source = $item.Source
       Rel = $item.Rel
-      Hash = if ($action -eq "PRESERVE_PREVIOUS") { $targetHash } else { $sourceHash }
+      Hash = if ($action -in @("PRESERVE_PREVIOUS", "PRESERVE_UNVERIFIED")) { $targetHash } else { $sourceHash }
       Target = $target
     }) | Out-Null
   }
@@ -291,7 +311,7 @@ try {
     exit 0
   }
 
-  $migrations = @($Plan | Where-Object Action -in @("REPLACE_AUTHORITATIVE", "MIGRATE_LEGACY", "MIGRATE_PREVIOUS"))
+  $migrations = @($Plan | Where-Object Action -in @("REPLACE_AUTHORITATIVE", "MIGRATE_LEGACY", "MIGRATE_PREVIOUS", "REPLACE_UNVERIFIED"))
   if ($migrations.Count -gt 0) {
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $backupDir = Join-Path $Dest ".agent-toolkit-backup\$stamp"
@@ -304,7 +324,7 @@ try {
     Write-Host "Previous toolkit backup: $backupDir"
   }
 
-  foreach ($item in $Plan | Where-Object { $_.Action -in @("CREATE", "UPDATE", "REPLACE_AUTHORITATIVE", "MIGRATE_LEGACY", "MIGRATE_PREVIOUS") }) {
+  foreach ($item in $Plan | Where-Object { $_.Action -in @("CREATE", "UPDATE", "REPLACE_AUTHORITATIVE", "MIGRATE_LEGACY", "MIGRATE_PREVIOUS", "REPLACE_UNVERIFIED") }) {
     $parent = Split-Path -Parent $item.Target
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     Copy-Item -LiteralPath $item.Source -Destination $item.Target -Force

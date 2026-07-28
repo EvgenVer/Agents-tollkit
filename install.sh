@@ -191,6 +191,25 @@ if [ "$NO_MANIFEST" -eq 1 ] && [ "$PREVIOUS_MODULAR" -eq 0 ] && [ -n "$PREVIOUS_
   done <"$PAIRS"
   [ "$previous_matches" -ge 3 ] && PREVIOUS_MODULAR=1
 fi
+UNVERIFIED_MODULAR=0
+if [ "$NO_MANIFEST" -eq 1 ] && [ "$PREVIOUS_MODULAR" -eq 0 ]; then
+  existing_managed_count=0
+  existing_managed_roots=""
+  while IFS=$'\t' read -r source_file rel; do
+    target="$DEST/$rel"
+    [ -f "$target" ] || continue
+    existing_managed_count=$((existing_managed_count + 1))
+    root_name="${rel%%/*}"
+    case ",$existing_managed_roots," in
+      *,"$root_name",*) ;;
+      *) existing_managed_roots="$existing_managed_roots,$root_name" ;;
+    esac
+  done <"$PAIRS"
+  existing_root_count="$(printf '%s' "$existing_managed_roots" | awk -F, '{count=0; for (i=1; i<=NF; i++) if ($i != "") count++; print count}')"
+  if [ "$existing_managed_count" -ge 5 ] && [ "$existing_root_count" -ge 3 ]; then
+    UNVERIFIED_MODULAR=1
+  fi
+fi
 
 lookup_old_hash() {
   OLD_HASH_RESULT=""
@@ -253,7 +272,7 @@ while IFS=$'\t' read -r source_file rel; do
         [ "$target_hash" = "$LEGACY_AGENTS_SHA256_CRLF" ]; }
     then
       action="MIGRATE_LEGACY"
-    elif [ "$PREVIOUS_MODULAR" -eq 1 ]; then
+      elif [ "$PREVIOUS_MODULAR" -eq 1 ]; then
       if [[ "$rel" == .claude/agents/* || "$rel" == .codex/agents/* ]]; then
         action="PRESERVE_PREVIOUS"
       else
@@ -273,7 +292,13 @@ while IFS=$'\t' read -r source_file rel; do
         fi
         action="MIGRATE_PREVIOUS"
       fi
-    elif [ -n "$old_hash" ]; then
+      elif [ "$UNVERIFIED_MODULAR" -eq 1 ]; then
+        if [[ "$rel" == .claude/agents/* || "$rel" == .codex/agents/* ]]; then
+          action="PRESERVE_UNVERIFIED"
+        else
+          action="REPLACE_UNVERIFIED"
+         fi
+      elif [ -n "$old_hash" ]; then
       if [ "$target_hash" != "$old_hash" ]; then
         echo "$rel: locally modified since the previous install" >>"$CONFLICTS"
         continue
@@ -290,7 +315,7 @@ while IFS=$'\t' read -r source_file rel; do
     fi
   fi
   manifest_hash="$source_hash"
-  [ "$action" = "PRESERVE_PREVIOUS" ] && manifest_hash="$target_hash"
+  [[ "$action" == "PRESERVE_PREVIOUS" || "$action" == "PRESERVE_UNVERIFIED" ]] && manifest_hash="$target_hash"
   printf '%s\t%s\t%s\t%s\n' "$action" "$source_file" "$rel" "$manifest_hash" >>"$PLAN"
 done <"$PAIRS"
 
@@ -321,13 +346,13 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-if grep -qE $'^(REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS)\t' "$PLAN"; then
+if grep -qE $'^(REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS|REPLACE_UNVERIFIED)\t' "$PLAN"; then
   stamp="$(date +%Y%m%d-%H%M%S)"
   backup_dir="$DEST/.agent-toolkit-backup/$stamp"
   mkdir -p "$backup_dir"
   while IFS=$'\t' read -r action source_file rel manifest_hash; do
     case "$action" in
-      REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS)
+      REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS|REPLACE_UNVERIFIED)
         target="$DEST/$rel"
         if [ -f "$target" ]; then
           mkdir -p "$backup_dir/$(dirname "$rel")"
@@ -341,7 +366,7 @@ fi
 
 while IFS=$'\t' read -r action source_file rel source_hash; do
   case "$action" in
-    CREATE|UPDATE|REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS)
+    CREATE|UPDATE|REPLACE_AUTHORITATIVE|MIGRATE_LEGACY|MIGRATE_PREVIOUS|REPLACE_UNVERIFIED)
       target="$DEST/$rel"
       mkdir -p "${target%/*}"
       cp "$source_file" "$target"

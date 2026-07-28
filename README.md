@@ -51,8 +51,10 @@ Projects containing the exact legacy single-file toolkit are detected automatica
 old `AGENTS.md` and any files replaced during migration are backed up under
 `.agent-toolkit-backup/<timestamp>/`. Projects installed by the immediately previous
 modular release are migrated the same way; locally tuned role-agent files are preserved.
-If a managed file cannot be recognized safely, the installer stops before writing and
-prints the file that needs manual reconciliation.
+Older modular installations without a manifest are recognized when a characteristic
+toolkit file set is present; replaced files are backed up and role-agent files are
+preserved. If a project does not contain enough evidence of a toolkit install, the
+installer stops before writing and prints the files that need manual reconciliation.
 
 The explicit `-MigrateLegacy` / `--migrate-legacy` flags remain accepted for compatibility,
 but are no longer required.

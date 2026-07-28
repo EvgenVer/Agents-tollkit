@@ -367,6 +367,83 @@ class InstallerTests(unittest.TestCase):
                     (target / "project.txt").read_text(encoding="utf-8"), "keep\n"
                 )
 
+    def test_unverified_modular_migration_uses_backup_fallback(self) -> None:
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        bash = _git_bash()
+        if not powershell and not bash:
+            self.skipTest("no supported installer shell is available")
+
+        installers = []
+        if powershell:
+            installers.append(
+                (
+                    "powershell",
+                    lambda source, target: subprocess.run(
+                        [
+                            powershell,
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-File",
+                            str(ROOT / "install.ps1"),
+                            "-Source",
+                            str(source),
+                        ],
+                        cwd=target,
+                        text=True,
+                        capture_output=True,
+                        timeout=60,
+                        check=False,
+                    ),
+                )
+            )
+        if bash:
+            installers.append(
+                (
+                    "bash",
+                    lambda source, target: subprocess.run(
+                        [
+                            str(bash),
+                            _shell_path(ROOT / "install.sh"),
+                            "--source",
+                            _shell_path(source),
+                        ],
+                        cwd=target,
+                        text=True,
+                        capture_output=True,
+                        timeout=60,
+                        check=False,
+                    ),
+                )
+            )
+
+        old_files = {
+            "AGENTS.md": "old custom router\n",
+            "docs/AGENT_WORKFLOWS.md": "old workflow\n",
+            ".agents/skills/bug-forensics/SKILL.md": "old bug skill\n",
+            ".claude/commands/orchestrate.md": "old command\n",
+            ".claude/skills/bug-forensics/SKILL.md": "old generated skill\n",
+            ".claude/agents/executor.md": "old executor\n",
+            ".codex/agents/executor.toml": "old executor\n",
+        }
+        for name, invoke in installers:
+            with self.subTest(installer=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source = ROOT
+                target = root / "target"
+                target.mkdir()
+                for rel, value in old_files.items():
+                    _write(target / rel, value)
+
+                migrated = invoke(source, target)
+                self.assertEqual(migrated.returncode, 0, migrated.stdout + migrated.stderr)
+                self.assertIn("REPLACE_UNVERIFIED", migrated.stdout)
+                backups = list(
+                    (target / ".agent-toolkit-backup").glob("*/docs/AGENT_WORKFLOWS.md")
+                )
+                self.assertEqual(len(backups), 1)
+                self.assertEqual(backups[0].read_text(encoding="utf-8"), "old workflow\n")
+
 
 if __name__ == "__main__":
     unittest.main()
