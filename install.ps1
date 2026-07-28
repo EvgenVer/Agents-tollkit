@@ -140,6 +140,7 @@ try {
   $ManifestPath = Join-Path $Dest $MANIFEST_NAME
   $OldHashes = @{}
   $PreviousModular = $false
+  $NoManifest = -not (Test-Path -LiteralPath $ManifestPath)
   if (Test-Path -LiteralPath $ManifestPath) {
     if ((Get-Item -LiteralPath $ManifestPath -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
       throw "$MANIFEST_NAME must not be a symbolic link"
@@ -164,7 +165,7 @@ try {
     $PreviousModular = $previousAgentsHash -in $PREVIOUS_AGENTS_SHA256
   }
   $PreviousRoot = $null
-  if ($PreviousModular -and (Test-Path -LiteralPath (Join-Path $Src ".git") -PathType Container)) {
+  if ($NoManifest -and (Test-Path -LiteralPath (Join-Path $Src ".git") -PathType Container)) {
     if (-not $TempRoot) {
       $TempRoot = Join-Path $env:TEMP ("agent-toolkit-" + [guid]::NewGuid().ToString("N"))
     }
@@ -177,6 +178,25 @@ try {
     $archiveExit = $LASTEXITCODE
     $ErrorActionPreference = $eap
     if ($archiveExit -ne 0) { $PreviousRoot = $null }
+  }
+  if ($NoManifest -and -not $PreviousModular -and $PreviousRoot) {
+    $previousMatches = 0
+    foreach ($item in $Managed) {
+      $target = Convert-ToTargetPath $item.Rel
+      if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { continue }
+      $previousRel = if ($item.Rel -like ".claude/skills/*") {
+        ".agents/skills/$($item.Rel.Substring('.claude/skills/'.Length))"
+      } else {
+        $item.Rel
+      }
+      $previousPath = Join-Path $PreviousRoot $previousRel
+      if (Test-Path -LiteralPath $previousPath -PathType Leaf) {
+        if ((Get-NormalizedSha256 $target) -eq (Get-NormalizedSha256 $previousPath)) {
+          $previousMatches++
+        }
+      }
+    }
+    $PreviousModular = $previousMatches -ge 3
   }
 
   $Plan = [System.Collections.Generic.List[object]]::new()

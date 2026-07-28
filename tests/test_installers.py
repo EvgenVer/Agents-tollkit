@@ -286,6 +286,13 @@ class InstallerTests(unittest.TestCase):
             ],
             cwd=ROOT,
         )
+        old_workflows = subprocess.check_output(
+            ["git", "show", "59f7cbc:docs/AGENT_WORKFLOWS.md"], cwd=ROOT
+        )
+        old_bug_skill = subprocess.check_output(
+            ["git", "show", "59f7cbc:.agents/skills/bug-forensics/SKILL.md"],
+            cwd=ROOT,
+        )
         installers = []
         if powershell:
             installers.append(
@@ -336,10 +343,17 @@ class InstallerTests(unittest.TestCase):
                 source = ROOT
                 target = root / "target"
                 target.mkdir()
-                (target / "AGENTS.md").write_bytes(old_agents)
+                old_agents_custom = old_agents + b"\nlocal customization\n"
+                (target / "AGENTS.md").write_bytes(old_agents_custom)
                 skill_target = target / ".claude" / "skills" / "ai-eval-design" / "SKILL.md"
                 skill_target.parent.mkdir(parents=True, exist_ok=True)
                 skill_target.write_bytes(old_skill)
+                workflows_target = target / "docs" / "AGENT_WORKFLOWS.md"
+                workflows_target.parent.mkdir(parents=True, exist_ok=True)
+                workflows_target.write_bytes(old_workflows)
+                bug_skill_target = target / ".agents" / "skills" / "bug-forensics" / "SKILL.md"
+                bug_skill_target.parent.mkdir(parents=True, exist_ok=True)
+                bug_skill_target.write_bytes(old_bug_skill)
                 _write(target / "project.txt", "keep\n")
 
                 migrated = invoke(source, target)
@@ -348,7 +362,7 @@ class InstallerTests(unittest.TestCase):
                     (target / ".agent-toolkit-backup").glob("*/AGENTS.md")
                 )
                 self.assertEqual(len(backups), 1)
-                self.assertEqual(backups[0].read_bytes(), old_agents)
+                self.assertEqual(backups[0].read_bytes(), old_agents_custom)
                 self.assertEqual(
                     (target / "project.txt").read_text(encoding="utf-8"), "keep\n"
                 )

@@ -139,9 +139,11 @@ fi
 
 MANIFEST="$DEST/$MANIFEST_NAME"
 PREVIOUS_MODULAR=0
+NO_MANIFEST=1
 if [ -L "$MANIFEST" ]; then
   echo "$MANIFEST_NAME: symbolic links are not supported" >>"$CONFLICTS"
 elif [ -e "$MANIFEST" ]; then
+  NO_MANIFEST=0
   [ -f "$MANIFEST" ] || { echo "$MANIFEST_NAME: target is not a file" >>"$CONFLICTS"; }
   if [ -f "$MANIFEST" ]; then
     IFS= read -r manifest_header <"$MANIFEST" || true
@@ -166,11 +168,28 @@ if [ ! -e "$MANIFEST" ] && [ -f "$DEST/AGENTS.md" ]; then
   fi
 fi
 PREVIOUS_ROOT=""
-if [ "$PREVIOUS_MODULAR" -eq 1 ] && [ -d "$SRC/.git" ] &&
+if [ "$NO_MANIFEST" -eq 1 ] && [ -d "$SRC/.git" ] &&
   git -C "$SRC" cat-file -e "$PREVIOUS_COMMIT^{commit}" >/dev/null 2>&1; then
   PREVIOUS_ROOT="$TMP/previous"
   mkdir -p "$PREVIOUS_ROOT"
   git -C "$SRC" archive "$PREVIOUS_COMMIT" | tar -xf - -C "$PREVIOUS_ROOT" || PREVIOUS_ROOT=""
+fi
+if [ "$NO_MANIFEST" -eq 1 ] && [ "$PREVIOUS_MODULAR" -eq 0 ] && [ -n "$PREVIOUS_ROOT" ]; then
+  previous_matches=0
+  while IFS=$'\t' read -r source_file rel; do
+    target="$DEST/$rel"
+    [ -f "$target" ] || continue
+    previous_rel="$rel"
+    case "$rel" in
+      .claude/skills/*) previous_rel=".agents/skills/${rel#.claude/skills/}" ;;
+    esac
+    previous_path="$PREVIOUS_ROOT/$previous_rel"
+    if [ -f "$previous_path" ] &&
+      [ "$(sha256_normalized_file "$target")" = "$(sha256_normalized_file "$previous_path")" ]; then
+      previous_matches=$((previous_matches + 1))
+    fi
+  done <"$PAIRS"
+  [ "$previous_matches" -ge 3 ] && PREVIOUS_MODULAR=1
 fi
 
 lookup_old_hash() {
