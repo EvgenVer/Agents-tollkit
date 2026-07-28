@@ -289,6 +289,9 @@ class InstallerTests(unittest.TestCase):
         old_workflows = subprocess.check_output(
             ["git", "show", "59f7cbc:docs/AGENT_WORKFLOWS.md"], cwd=ROOT
         )
+        old_evals = subprocess.check_output(
+            ["git", "show", "59f7cbc:docs/EVALS.md"], cwd=ROOT
+        )
         old_bug_skill = subprocess.check_output(
             ["git", "show", "59f7cbc:.agents/skills/bug-forensics/SKILL.md"],
             cwd=ROOT,
@@ -366,6 +369,16 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual(
                     (target / "project.txt").read_text(encoding="utf-8"), "keep\n"
                 )
+
+                strict_target = root / "strict-target"
+                strict_target.mkdir()
+                (strict_target / "AGENTS.md").write_bytes(old_agents)
+                strict_evals = strict_target / "docs" / "EVALS.md"
+                strict_evals.parent.mkdir(parents=True, exist_ok=True)
+                strict_evals.write_bytes(old_evals + b"\nlocal customization\n")
+                strict = invoke(source, strict_target)
+                self.assertEqual(2, strict.returncode, strict.stdout + strict.stderr)
+                self.assertEqual((strict_target / "AGENTS.md").read_bytes(), old_agents)
 
     def test_unverified_modular_migration_uses_backup_fallback(self) -> None:
         powershell = shutil.which("powershell.exe") or shutil.which("pwsh")

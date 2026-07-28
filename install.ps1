@@ -179,25 +179,6 @@ try {
     $ErrorActionPreference = $eap
     if ($archiveExit -ne 0) { $PreviousRoot = $null }
   }
-  if ($NoManifest -and -not $PreviousModular -and $PreviousRoot) {
-    $previousMatches = 0
-    foreach ($item in $Managed) {
-      $target = Convert-ToTargetPath $item.Rel
-      if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { continue }
-      $previousRel = if ($item.Rel -like ".claude/skills/*") {
-        ".agents/skills/$($item.Rel.Substring('.claude/skills/'.Length))"
-      } else {
-        $item.Rel
-      }
-      $previousPath = Join-Path $PreviousRoot $previousRel
-      if (Test-Path -LiteralPath $previousPath -PathType Leaf) {
-        if ((Get-NormalizedSha256 $target) -eq (Get-NormalizedSha256 $previousPath)) {
-          $previousMatches++
-        }
-      }
-    }
-    $PreviousModular = $previousMatches -ge 3
-  }
   $UnverifiedModular = $false
   if ($NoManifest -and -not $PreviousModular) {
     $existingManagedCount = 0
@@ -210,7 +191,7 @@ try {
         $existingManagedRoots[$rootName] = $true
       }
     }
-    $UnverifiedModular = $existingManagedCount -ge 5 -and $existingManagedRoots.Count -ge 3
+    $UnverifiedModular = $existingManagedCount -ge 4 -and $existingManagedRoots.Count -ge 3
   }
 
   $Plan = [System.Collections.Generic.List[object]]::new()

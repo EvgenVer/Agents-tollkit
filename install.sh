@@ -174,23 +174,6 @@ if [ "$NO_MANIFEST" -eq 1 ] && [ -d "$SRC/.git" ] &&
   mkdir -p "$PREVIOUS_ROOT"
   git -C "$SRC" archive "$PREVIOUS_COMMIT" | tar -xf - -C "$PREVIOUS_ROOT" || PREVIOUS_ROOT=""
 fi
-if [ "$NO_MANIFEST" -eq 1 ] && [ "$PREVIOUS_MODULAR" -eq 0 ] && [ -n "$PREVIOUS_ROOT" ]; then
-  previous_matches=0
-  while IFS=$'\t' read -r source_file rel; do
-    target="$DEST/$rel"
-    [ -f "$target" ] || continue
-    previous_rel="$rel"
-    case "$rel" in
-      .claude/skills/*) previous_rel=".agents/skills/${rel#.claude/skills/}" ;;
-    esac
-    previous_path="$PREVIOUS_ROOT/$previous_rel"
-    if [ -f "$previous_path" ] &&
-      [ "$(sha256_normalized_file "$target")" = "$(sha256_normalized_file "$previous_path")" ]; then
-      previous_matches=$((previous_matches + 1))
-    fi
-  done <"$PAIRS"
-  [ "$previous_matches" -ge 3 ] && PREVIOUS_MODULAR=1
-fi
 UNVERIFIED_MODULAR=0
 if [ "$NO_MANIFEST" -eq 1 ] && [ "$PREVIOUS_MODULAR" -eq 0 ]; then
   existing_managed_count=0
@@ -206,7 +189,7 @@ if [ "$NO_MANIFEST" -eq 1 ] && [ "$PREVIOUS_MODULAR" -eq 0 ]; then
     esac
   done <"$PAIRS"
   existing_root_count="$(printf '%s' "$existing_managed_roots" | awk -F, '{count=0; for (i=1; i<=NF; i++) if ($i != "") count++; print count}')"
-  if [ "$existing_managed_count" -ge 5 ] && [ "$existing_root_count" -ge 3 ]; then
+  if [ "$existing_managed_count" -ge 4 ] && [ "$existing_root_count" -ge 3 ]; then
     UNVERIFIED_MODULAR=1
   fi
 fi
