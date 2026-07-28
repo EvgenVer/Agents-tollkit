@@ -207,17 +207,24 @@ try {
       } elseif ($PreviousModular) {
         if ($item.Rel -like ".claude/agents/*" -or $item.Rel -like ".codex/agents/*") {
           $action = "PRESERVE_PREVIOUS"
-        } elseif ($PreviousRoot -and (Test-Path -LiteralPath (Join-Path $PreviousRoot $item.Rel) -PathType Leaf)) {
-          $previousHash = Get-NormalizedSha256 (Join-Path $PreviousRoot $item.Rel)
+        } else {
+          $previousRel = if ($item.Rel -like ".claude/skills/*") {
+            ".agents/skills/$($item.Rel.Substring('.claude/skills/'.Length))"
+          } else {
+            $item.Rel
+          }
+          $previousPath = if ($PreviousRoot) { Join-Path $PreviousRoot $previousRel } else { $null }
+          if (-not $previousPath -or -not (Test-Path -LiteralPath $previousPath -PathType Leaf)) {
+            $Conflicts.Add("$($item.Rel): cannot verify previous-release ownership") | Out-Null
+            continue
+          }
+          $previousHash = Get-NormalizedSha256 $previousPath
           $targetNormalizedHash = Get-NormalizedSha256 $target
           if ($targetNormalizedHash -ne $previousHash) {
             $Conflicts.Add("$($item.Rel): locally modified since the previous release") | Out-Null
             continue
           }
           $action = "MIGRATE_PREVIOUS"
-        } else {
-          $Conflicts.Add("$($item.Rel): cannot verify previous-release ownership") | Out-Null
-          continue
         }
       } elseif ($OldHashes.ContainsKey($item.Rel)) {
         if ($targetHash -ne $OldHashes[$item.Rel]) {

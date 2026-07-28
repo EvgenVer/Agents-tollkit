@@ -278,6 +278,14 @@ class InstallerTests(unittest.TestCase):
         old_agents = subprocess.check_output(
             ["git", "show", "59f7cbc:AGENTS.md"], cwd=ROOT
         )
+        old_skill = subprocess.check_output(
+            [
+                "git",
+                "show",
+                "59f7cbc:.agents/skills/ai-eval-design/SKILL.md",
+            ],
+            cwd=ROOT,
+        )
         installers = []
         if powershell:
             installers.append(
@@ -329,6 +337,9 @@ class InstallerTests(unittest.TestCase):
                 target = root / "target"
                 target.mkdir()
                 (target / "AGENTS.md").write_bytes(old_agents)
+                skill_target = target / ".claude" / "skills" / "ai-eval-design" / "SKILL.md"
+                skill_target.parent.mkdir(parents=True, exist_ok=True)
+                skill_target.write_bytes(old_skill)
                 _write(target / "project.txt", "keep\n")
 
                 migrated = invoke(source, target)

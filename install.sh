@@ -237,17 +237,22 @@ while IFS=$'\t' read -r source_file rel; do
     elif [ "$PREVIOUS_MODULAR" -eq 1 ]; then
       if [[ "$rel" == .claude/agents/* || "$rel" == .codex/agents/* ]]; then
         action="PRESERVE_PREVIOUS"
-      elif [ -n "$PREVIOUS_ROOT" ] && [ -f "$PREVIOUS_ROOT/$rel" ]; then
-        previous_hash="$(sha256_normalized_file "$PREVIOUS_ROOT/$rel")"
+      else
+        previous_rel="$rel"
+        case "$rel" in
+          .claude/skills/*) previous_rel=".agents/skills/${rel#.claude/skills/}" ;;
+        esac
+        if [ -z "$PREVIOUS_ROOT" ] || [ ! -f "$PREVIOUS_ROOT/$previous_rel" ]; then
+          echo "$rel: cannot verify previous-release ownership" >>"$CONFLICTS"
+          continue
+        fi
+        previous_hash="$(sha256_normalized_file "$PREVIOUS_ROOT/$previous_rel")"
         target_normalized_hash="$(sha256_normalized_file "$target")"
         if [ "$target_normalized_hash" != "$previous_hash" ]; then
           echo "$rel: locally modified since the previous release" >>"$CONFLICTS"
           continue
         fi
         action="MIGRATE_PREVIOUS"
-      else
-        echo "$rel: cannot verify previous-release ownership" >>"$CONFLICTS"
-        continue
       fi
     elif [ -n "$old_hash" ]; then
       if [ "$target_hash" != "$old_hash" ]; then
