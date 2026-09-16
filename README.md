@@ -1,158 +1,234 @@
 # AI-Agent Workflow Toolkit
 
-A portable governance harness for AI coding agents (Claude Code, Codex, …). It makes an
-agent plan before risky work, stop at approval gates, treat external content as untrusted,
-vet dependencies, and validate AI behavior with evals — not just tests.
+Shared working rules for Codex, Claude Code, and agents that can read AGENTS.md.
+The aim is a readable plan, one task ledger, and continued work within the user's
+authorized scope. Project details stay out of the universal rules.
 
-`AGENTS.md` is the always-loaded entry router; everything else loads on demand.
+## Choose a version
 
-## What's in here
-| Path | Role |
-|------|------|
-| `AGENTS.md` | Always-loaded router: hard rules, source-of-truth map, skills catalog. **Start here.** |
-| `CLAUDE.md` | Thin pointer so Claude Code obeys `AGENTS.md`. |
-| `docs/` | Detailed policies: SECURITY, EVALS, TOOLS, CODE_REVIEW, AGENT_WORKFLOWS. |
-| `.agents/skills/<name>/SKILL.md` | On-demand procedures (planning, bug-forensics, code-review, …). |
-| `.agents/skills/planning/assets/` | Templates: SPECIFICATION, PLAN, TASKS, DESCRIPTION, MEMORY, NOTES, AGENT_RUNS, spec.feature. |
-| `.claude/commands/` | Claude Code slash commands (e.g. `/grill`, `/orchestrate`) — Claude-Code-specific; other tools use the natural-language trigger. |
-| `.claude/agents/`, `.codex/agents/` | Managed role agents for opt-in orchestration (executor/reviewer); local model tuning is never silently overwritten. |
-| `evals/` | Local legacy/current/candidate behavior benchmark with hidden checks and JSON/Markdown reports. |
-| `AGENTS_WORKFLOW_LEGACY/AGENTS_v1.md` | Immutable single-file baseline used by the benchmark. |
+| Version | Best fit | What to copy/install |
+|---|---|---|
+| Lite | Small projects with a short plan and sequential work | Only [lite/AGENTS.md](lite/AGENTS.md) |
+| Full toolkit | Projects needing packaged skills, templates, and a document checker | Use the installers below |
 
-## Install
+### Use Lite
 
-Run the installer from the root of any project. It downloads the reviewed toolkit
-checkout from GitHub into a temporary directory, installs it, and removes that checkout
-before exiting. No toolkit checkout or installation-only files remain in the project.
+Copy [lite/AGENTS.md](lite/AGENTS.md) to the project root as `AGENTS.md`. Review and
+merge any existing rules instead of overwriting them. No installer, Python, skills,
+or other toolkit files are required. The current installers install the full toolkit.
 
-```powershell
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.ps1 | iex
-```
+Start the agent with:
 
-```bash
-# macOS / Linux / Git-Bash
-curl -fsSL https://raw.githubusercontent.com/EvgenVer/Agents-tollkit/master/install.sh | bash
-```
+> Read AGENTS.md. Use the project idea I provide for DESCRIPTION.md. Prepare only
+> the planning documents this work needs, then implement within my authorized scope.
 
-The preflight prints every create/update/preserve action and aborts on conflicts before
-writing. The installer updates ordinary files it owns using `.agent-toolkit-manifest.tsv`
-hashes; it never deletes project directories or runs `git init`. `AGENTS.md` and
-`CLAUDE.md` are authoritative toolkit entrypoints: if they differ, the old copies are
-backed up and the new versions are applied. Project documents and the project's
-`README.md` remain untouched. A locally tuned role-agent file is preserved during
-migration and remains visible in the manifest for later reconciliation.
+For a client that does not automatically load AGENTS.md, explicitly ask it to read
+the file at the start of the session. Keep the file's rules project-neutral.
 
-For a dry run, download the script to a temporary file, execute it with `-DryRun` (or
-`--dry-run`), then remove that file after inspection. The normal one-line commands above
-already clean up their temporary GitHub checkout automatically.
+Lite includes the canonical headings and PLAN/TASKS table formats. Bounded corrections
+use existing documents or the request; multi-step project work gets a written plan
+and task ledger. Document consistency is checked by the agent without an external
+script. Its behavior and total token savings have not yet been evaluated; the short
+minimal AGENTS used in the comparison is a different file, not this Lite version.
 
-Projects containing the exact legacy single-file toolkit are detected automatically. The
-old `AGENTS.md` and any files replaced during migration are backed up under
-`.agent-toolkit-backup/<timestamp>/`. Projects installed by the immediately previous
-modular release are migrated the same way; locally tuned role-agent files are preserved.
-Older modular installations without a manifest are recognized when a characteristic
-toolkit file set is present; replaced files are backed up and role-agent files are
-preserved. If a project does not contain enough evidence of a toolkit install, the
-installer stops before writing and prints the files that need manual reconciliation.
+When moving from Lite to the full toolkit, use the existing-project update procedure
+below. Compatible document formats reduce rewriting; review actual documents and
+custom rules, and preserve their contents. The clean installer refuses existing rules.
 
-The explicit `-MigrateLegacy` / `--migrate-legacy` flags remain accepted for compatibility,
-but are no longer required.
+## Start a new project with the full toolkit
 
+Requirements: PowerShell on Windows, or Bash on Linux/macOS/Git Bash.
+Git is needed only when downloading the toolkit. Python 3.10+ is needed for the
+optional document checker, not installation.
 
-To start a project: open Claude Code or Codex here and say — *"Follow AGENTS.md. No
-DESCRIPTION yet, grill me on <your idea>, then the planning gate, and stop for approval."*
-(In Claude Code you can also run `/grill`.) From there the agent runs: bootstrap DESCRIPTION →
-planning gate → risk gate → small-batch implement → validate → proportional review →
-report. Read-only and trivial work use a fast path without workflow-skill, run-log, or
-commit ceremony; every write still gets a final diff/scope/evidence check.
+Keep a reviewed toolkit checkout **outside** the target project. Run from an empty
+project directory (a Git directory, README, LICENSE, .gitignore, and .gitattributes
+are allowed):
 
-**Optional — orchestrated execution:** once SPEC/PLAN/TASKS are approved, `/orchestrate`
-(Claude Code; explicit phrase in other tools) first checks whether parallelism is useful.
-Eligible substantial work runs in dependency-ready waves of up to three disjoint,
-single-check executors, followed by one integration validation and coordinator review.
-A fresh reviewer is reserved for large/risky or explicitly independent review. Small,
-sequential, overlapping, or high-risk work returns `ORCHESTRATION_NOT_BENEFICIAL`
-without dispatching subagents.
-Strictly opt-in: without the command the workflow is unchanged.
+~~~powershell
+# Windows; replace the example path with your toolkit checkout.
+& "C:\tools\AGENTS_toolkit\install.ps1" -Source "C:\tools\AGENTS_toolkit" -DryRun
+& "C:\tools\AGENTS_toolkit\install.ps1" -Source "C:\tools\AGENTS_toolkit"
+~~~
 
-*Manual install (no script):* copy `AGENTS.md`, `CLAUDE.md`, `docs/`, `.agents/`,
-`.claude/commands/`, `.claude/agents/`, and `.codex/agents/` (not the whole `.claude/` —
-it may hold a machine-specific `settings.local.json`); merge the `.gitignore` secrets
-section; and copy `.agents/skills/` to `.claude/skills/` for native Claude Code discovery.
+~~~bash
+# Linux / macOS / Git Bash
+bash /path/to/AGENTS_toolkit/install.sh --source /path/to/AGENTS_toolkit --dry-run
+bash /path/to/AGENTS_toolkit/install.sh --source /path/to/AGENTS_toolkit
+~~~
 
-## Automated comparison
+Source selection: an explicit source, then TK_SRC, then the script's toolkit checkout.
+Without a local source, a downloaded script clones the repository's master branch
+into a temporary directory. Inspect that revision before trusting it. Dry run requires
+a local source and makes no writes or downloads.
 
-List the deterministic scenarios without calling a model:
+The installer adds AGENTS.md, CLAUDE.md, .agents, Claude commands/skills/roles, Codex
+roles, and an informational file inventory. It does not initialize Git, install
+packages, create project plans, or change existing bootstrap files. Application files,
+existing rules/plans, and a previous toolkit installation cause refusal **before
+installation writes**. Re-running the installer is not an update. The old migration
+flags are explicitly rejected. Links, junctions where detectable, hard links, and
+protected source paths are unsupported. Do not modify source or target concurrently
+with installation; an I/O failure can leave a partial install that needs inspection.
 
-```bash
-python -m evals --provider codex --suite all --list
-```
+Open the project in your agent and describe the idea. For example:
 
-Run a bounded smoke comparison of legacy, the pinned current baseline, and the working
-candidate:
+> Read AGENTS.md. I want an offline reading-list utility. Use what I have already
+> explained, ask only for missing decisions, and prepare the project documents.
 
-```bash
-python -m evals --provider codex --suite smoke --runs 1 --yes
-```
+Then authorize the desired implementation scope:
 
-Run the reproducible three-pass comparison (84 provider calls) from a standalone terminal,
-not from a nested Codex Desktop session:
+> Implement the agreed plan through all phases. Continue with independent ready work
+> when one task is blocked. Explain progress in plain language.
 
-```bash
-python -m evals --provider codex --suite all --runs 3 --enforce-gates --model gpt-5.6-sol --reasoning-effort high --service-tier default --yes
-```
+A direct request for a bounded correction can authorize that correction without a
+full document set. Approving a design alone does not imply permission for every
+external or destructive operation. Existing explicit permissions remain valid within
+their scope; progress reports and phase boundaries are not automatic stopping points.
 
-When only Candidate changed, avoid rerunning stable variants by supplying their compatible
-`report.json` with repeatable `--baseline-report` and selecting
-`--variant candidate`. Compatibility requires the same provider, model settings, run
-count, seed, and pinned Current ref; fresh rows replace matching reused rows.
+## Read the project state
 
-The first scheduled write case doubles as a write-canary. A read-only provider workspace
-or a failed trivial candidate edit stops the run immediately instead of wasting the
-remaining calls or turning blocked edits into behavioral failures.
-On native Windows, the runner uses the `unelevated` sandbox backend so newly-created
-artifacts remain readable by the parent grading process, and removes inherited Codex
-Desktop session-policy variables from child CLI processes. The `workspace-write`
-boundary remains active. Temporary fixture checkouts are created below the selected
-artifacts directory instead of the system `%TEMP%`, which keeps them inside the
-provider's accessible workspace tree and preserves inherited sandbox ACLs.
-Reports separate cached input, uncached input/output, commands, model turns, skill/doc
-reads, git commands, direct dispatches, and collaboration waits. The enforced Legacy
-gate requires every candidate run to pass, aggregate median wall time and total tokens
-to stay within 10%, uncached-input-plus-output not to exceed Legacy, and the six core
-workflow cases to use at most 48 raw median commands and 25 sequential command rounds in
-total. Provider-reported cost, when available, must not exceed Legacy. The same full
-sequential implementation is also run under Legacy and Candidate instructions.
-Candidate orchestration must preserve quality, show real parallel collaboration, reduce
-median wall time by at least 10%, and keep tokens within 1.5x of Candidate sequential.
+| File | Read it to understand |
+|---|---|
+| DESCRIPTION.md | The idea, audience, and context |
+| SPECIFICATION.md | Required behavior, constraints, and acceptance |
+| PLAN.md | Ordered phase outcomes, architecture/stack decisions, verification approach |
+| TASKS.md | Current scope/checkpoint and atomic tasks, dependencies, results |
 
-Use `--provider claude` for Claude Code. `--release` uses five repetitions and enforces
-the same gates. Reports are written to `.artifacts/evals/`; provider calls are never made
-without explicit `--yes`. A real run sends the selected fixture and installed toolkit
-instructions to that provider, so review the fixtures and call bound before adding
-`--yes`. The pinned `current` commit must exist locally; fetch it in a shallow CI checkout
-or override it with `--current-ref <commit>`.
+All four use [fixed templates](.agents/skills/planning/assets/) with stable English
+headings; project prose can use the agreed language. PLAN contains no duplicate task
+status. TASKS is grouped by phase; decompose a phase before starting it, retain completed
+rows, and normally leave future phases coarse.
 
-## How the templates are used
-You don't fill these by hand. The master skeletons live in
-`.agents/skills/planning/assets/` as `*.template.md` and stay there for reuse. When the
-planning gate creates a missing document, **the agent instantiates only the required
-templates in one batch**: `SPECIFICATION.template.md` → `SPECIFICATION.md`, dropping the
-`.template` suffix and deleting the commented-out EXAMPLE block. Existing documents
-define their own structure and are updated directly.
+Task table columns are **ID / Task / Status / After / Verification**. Rows express
+priority; After expresses actual prerequisites. Insert T7.1 before T8 if new work
+belongs there, and add T7.1 to T8's After when it is required. Do not create T7.1.1.
+A done task needs actual verification evidence; skipped checks remain unverified.
+A phase can reuse task checks that already prove its outcome.
 
-Your role is to supply the content and decisions (especially `DESCRIPTION` at the start)
-and to approve. The agent fills them in this order: `DESCRIPTION` → `SPECIFICATION` →
-`specs/<feature>` → `PLAN` → `TASKS`.
+See the [filled example and state transitions](.agents/skills/planning/examples/reading-list/README.md).
+To inspect structure or derive a status view:
 
-## Skills across tools
-`.agents/skills/` is the source of truth and is **natively discovered by Codex and
-Antigravity**. **Claude Code** discovers skills from `.claude/skills/`, so the installer
-generates `.claude/skills/` as a copy — the same `SKILL.md` files, so all three tools find
-them without a hint. The catalog in `AGENTS.md` §12 stays as the router/index — keep it in
-sync when you add a skill.
+~~~text
+python .agents/skills/planning/scripts/check_docs.py check --root .
+python .agents/skills/planning/scripts/check_docs.py status --root .
+~~~
 
-## Don't duplicate the rules
-`AGENTS.md` is authoritative. This README only explains how to adopt the toolkit; it is not
-a second copy of the rules. Change rules in `AGENTS.md` (with approval), never here.
+Use --json for machine-readable output. Check after phase decomposition/closure or
+other coherent structural changes, not every progress note. Reuse an unchanged passing
+result. The script reads only the four named documents and
+does not run project commands or edit files. It checks format and references; the
+agent still assesses task size, requirement coverage, permissions, and evidence truth.
+
+The single [workflow graph](.agents/docs/AGENT_WORKFLOWS.md) defines selection,
+decomposition, verification, recovery, checkpoints, and continuation. A report explains
+what changed, what was verified, and what comes next or needs the user.
+
+## Create optional files only when needed
+
+| Artifact | Exact trigger |
+|---|---|
+| MEMORY.md | An explicit durable preference or reproduced environment limitation with a verified workaround, useful across sessions and not cheaply recoverable elsewhere |
+| specs/name.md | A separately maintained public API/file-format compatibility contract, persisted-schema evolution, permission/state matrix, or independently versioned AI behavior contract |
+| PLAN / Technical decisions / Integrations | A service or MCP is actually adopted |
+| TASKS / Proposals | There is an out-of-scope idea to retain |
+| TASKS / ID changes | A format migration changes existing IDs |
+| AGENT_RUNS.md | The user explicitly asks for a separate run log |
+
+MEMORY entries record the fact, source, and date; reevaluate them when context changes.
+Do not store current progress, requirements, architecture, hypotheses, permissions, or
+secrets there. NOTES, STATUS, PROGRESS, and ROADMAP are not extra workflow requirements.
+
+## Update an existing project
+
+**Ask the agent to update it; do not run the installer.** This is the authoritative
+update procedure. A template change requires understanding task meaning and references,
+so no script converts or merges existing project documents.
+
+1. Identify the reviewed new toolkit source and inspect the project's current rules,
+   documents, relevant code, and version-control status. Read only needed nonsecret
+   content. Identify project-specific rules, configured models, completed work, live
+   references, and useful legacy documentation. Reuse known decisions.
+2. Preserve originals of every nonsecret file to be replaced or removed, including
+   uncommitted changes, under .agent-toolkit-backup/date-time/ in the project (or an
+   already agreed equivalent). Add that location to the project's ignore file. Do not
+   copy secrets or rely on Git alone to preserve uncommitted content. No whole-project
+   backup, reset, or automatic rollback engine is required.
+3. Reconcile the new universal AGENTS/CLAUDE rules, .agents skills/guides, Claude
+   commands/skill copies, and Claude/Codex roles. Keep configured model choices and
+   compatible user customizations. Move product context into DESCRIPTION/SPECIFICATION,
+   technical decisions into PLAN; resolve any material conflicting rule with the user.
+   Refresh both skill copies from the reconciled canonical .agents source.
+4. Rewrite the four core documents using the new templates. Recover facts from the
+   project instead of inventing requirements, approval, completion, or evidence.
+   Keep a coarse phase sequence in PLAN; decompose the current phase in TASKS and retain
+   useful future decomposition. Preserve done/cancelled work and its result evidence.
+   If old completion has no proof, record Result: unverified — evidence unavailable.
+5. Normalize **all** legacy phase/task IDs, including terminal rows, into the new
+   sequence. Update Current, After, links in active specs/code/comments/docs, and every
+   other live reference together. Under TASKS / Tasks / ID changes, record qualified
+   previous references and their new targets. Historical text in backups is not a live
+   alias. If the project already uses the canonical format, keep its valid IDs stable.
+6. Move useful content before removing obsolete toolkit-owned docs/TOOLS.md,
+   docs/CODE_REVIEW.md, old toolkit guides in docs/, NOTES/template, or risk-summary
+   template. Tool choices belong in PLAN; working results belong with tasks; durable
+   facts may qualify for MEMORY. Preserve unrelated project docs and requested historic
+   logs. Remove only the identified obsolete files covered by the update authorization.
+   Treat a previous manifest as historical installation information, not overwrite
+   authority.
+7. Run the new document checker once; review semantic coverage, task order, blockers,
+   evidence, customizations, adapter links, and the final diff. Run relevant existing
+   project checks if behavior changed. Resolve ambiguous meaning before dependent work;
+   continue independent reconciliation. Report changed files, remaining decisions, and
+   the next ready task. The update request itself does not start product implementation.
+
+Example: legacy references such as "phase A / item 1.2", "B-03", and "patch-final"
+become T1, T2, and T3 in execution order. A completed "B-03" remains done with the same
+evidence but is now T2; all live prerequisites use T2. The ID changes table records
+"B-03 → T2". During later ordinary work, done/cancelled IDs stay stable; only a bounded
+unfinished queue may be renumbered.
+
+Copy this request into the **existing project's** agent session and replace the path:
+
+> Update this project to the reviewed toolkit at /absolute/path/to/AGENTS_toolkit.
+> Follow its README section "Update an existing project"; do not use its installer.
+> I authorize reconciliation of toolkit files and planning documents, preservation of
+> nonsecret originals in the project's ignored backup directory, and removal of the
+> obsolete toolkit-owned files identified in that procedure after their useful content
+> is preserved. Keep project code, unrelated documentation, configured models, and
+> compatible custom rules. Normalize legacy task IDs, including completed ones, and
+> update all live references; preserve task meaning, statuses, and evidence. Ask only
+> about decisions you cannot infer reliably. Check the result and report the next
+> ready task; do not begin product implementation as part of this update.
+
+## Tool entry points and skills
+
+AGENTS.md is the shared source; CLAUDE.md imports it. Installation copies the canonical
+.agents/skills to .claude/skills. Claude commands are thin adapters. Codex role files
+and Claude role files support explicit orchestration; orchestration may use a sequential
+fallback when parallel work provides no benefit, unless the user requested parallel
+execution only. Role model choices are configuration and must survive an update.
+
+For a tool that does not automatically load AGENTS.md (including an Antigravity setup
+without such a rule), explicitly instruct it to read AGENTS.md and follow linked skills.
+The common file format supports handoff; tool discovery and real session behavior
+still need validation in each installed client. This repository's runner supports
+Codex and Claude; it does not establish Antigravity compatibility by itself.
+
+The nine skills are planning, grill, bug-forensics, code-review, dependency-vetting,
+ai-eval-design, docs-maintenance, orchestration, and security-review. Load them for
+their stated triggers; the default is one continuing workflow, not a menu of modes.
+
+## Maintain and verify the toolkit
+
+Toolkit guides live in [.agents/docs](.agents/docs/); project docs/ stays project-owned.
+Review/security checklists live in the corresponding skills. Behavior benchmark
+commands, baselines, cases, and coverage limits are in [evals/README.md](evals/README.md).
+
+~~~text
+python -m unittest discover -s tests -v
+python .agents/skills/planning/scripts/check_docs.py check --root .agents/skills/planning/examples/reading-list
+~~~
+
+Tests use disposable synthetic fixtures. Live model evaluations are a separate,
+bounded operation; passing unit tests does not demonstrate improved agent behavior.

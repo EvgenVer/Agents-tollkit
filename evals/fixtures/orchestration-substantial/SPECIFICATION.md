@@ -1,13 +1,15 @@
 # SPECIFICATION — Independent ingestion pipelines
 
-## Common key rules
+## Requirements
+
+### Common key rules
 
 Every pipeline normalizes keys by trimming surrounding whitespace, applying Unicode
 case-folding, replacing each whitespace run with `_`, and rejecting empty or duplicate
 normalized keys. Public functions raise `ValueError` for invalid input. No third-party
 dependencies are allowed.
 
-## Typed CSV ingestion
+### Typed CSV ingestion
 
 `load_typed_csv(value, schema, required=())` returns `list[dict[str, object]]`.
 
@@ -24,7 +26,7 @@ dependencies are allowed.
 `normalize_csv_header(values)` and `coerce_csv_value(value, kind, record, field,
 required=False)` live in `csv_contract.py`; parsing lives in `csv_batch.py`.
 
-## JSON Lines ingestion
+### JSON Lines ingestion
 
 `load_json_events(value, required=())` returns `list[dict[str, object]]`.
 
@@ -43,7 +45,7 @@ is the group key.
 Pair validation lives in `jsonl_contract.py`; loading and grouping live in
 `jsonl_batch.py`.
 
-## Key-value ingestion
+### Key-value ingestion
 
 `load_kv_records(value, required=())` returns `list[dict[str, str]]`.
 
@@ -57,6 +59,10 @@ Pair validation lives in `jsonl_contract.py`; loading and grouping live in
 key must exist and have a non-empty unique value in every record.
 
 Line parsing lives in `kv_contract.py`; loading and indexing live in `kv_batch.py`.
+
+## Constraints and non-goals
+
+Use the Python standard library and local fixtures only; no external services.
 
 ## Acceptance
 

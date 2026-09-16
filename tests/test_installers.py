@@ -1,461 +1,205 @@
 from __future__ import annotations
 
-import hashlib
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
-from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
+TEMP = ROOT / ".artifacts" / "tests"
+TEMP.mkdir(parents=True, exist_ok=True)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _minimal_source(root: Path) -> Path:
-    source = root / "source"
-    _write(source / "AGENTS.md", "candidate agents\n")
-    _write(source / "CLAUDE.md", "@AGENTS.md\n")
-    _write(source / "docs" / "POLICY.md", "policy\n")
-    _write(
-        source / ".agents" / "skills" / "demo" / "SKILL.md",
-        "---\nname: demo\ndescription: test\n---\n",
-    )
-    _write(source / ".claude" / "commands" / "demo.md", "demo\n")
-    _write(source / ".claude" / "agents" / "executor.md", "default role\n")
-    _write(source / ".codex" / "agents" / "executor.toml", 'name = "executor"\n')
+def source_at(root):
+    source = root / "source with spaces"
+    for relative, text in {
+        "AGENTS.md": "candidate rules\n",
+        "CLAUDE.md": "@AGENTS.md\n",
+        ".agents/docs/AGENT_WORKFLOWS.md": "workflow\n",
+        ".agents/skills/demo/SKILL.md": "---\nname: demo\ndescription: demo\n---\n",
+        ".claude/commands/demo.md": "command\n",
+        ".claude/agents/executor.md": "model: sonnet\n",
+        ".codex/agents/executor.toml": 'name = "executor"\n',
+        ".agents/skills/demo/__pycache__/demo.pyc": "skip\n",
+    }.items():
+        write(source / relative, text)
     return source
 
 
-def _git_bash() -> Path | None:
-    candidates = [
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
-        / "Git"
-        / "bin"
-        / "bash.exe",
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
-        / "Git"
-        / "usr"
-        / "bin"
-        / "bash.exe",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    found = shutil.which("bash")
-    return Path(found) if found and os.name != "nt" else None
+def git_bash():
+    if os.name == "nt":
+        for sub in ("bin", "usr/bin"):
+            path = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git" / sub / "bash.exe"
+            if path.exists():
+                return str(path)
+        return None
+    return shutil.which("bash")
 
 
-def _shell_path(path: Path) -> str:
-    resolved = path.resolve()
-    if os.name != "nt":
-        return str(resolved)
-    drive = resolved.drive.rstrip(":").lower()
-    tail = resolved.as_posix().split(":", 1)[1]
-    return f"/{drive}{tail}"
+def shell_path(path):
+    value = path.resolve().as_posix()
+    return "/" + value[0].lower() + value[2:] if os.name == "nt" else value
+
+
+def snapshot(root):
+    return {p.relative_to(root).as_posix(): p.read_bytes()
+            for p in root.rglob("*") if p.is_file() and not p.is_symlink()}
 
 
 class InstallerTests(unittest.TestCase):
-    def _assert_lifecycle(self, invoke) -> None:
-        with tempfile.TemporaryDirectory() as temp:
+    def exercise(self, shell):
+        with tempfile.TemporaryDirectory(dir=TEMP) as temp:
             root = Path(temp)
-            source = _minimal_source(root)
+            source = source_at(root)
+            target = root / "target with spaces"
+            target.mkdir()
+            write(target / "README.md", "# My project\n")
+            write(target / ".gitignore", "custom-cache/\n")
+            (target / ".git").mkdir()
+            before = snapshot(target)
+
+            def invoke(*flags, selected_source=source):
+                if shell == "powershell":
+                    exe = shutil.which("pwsh") or shutil.which("powershell")
+                    if not exe:
+                        self.skipTest("PowerShell unavailable")
+                    args = [exe, "-NoProfile", "-NonInteractive", "-File", str(ROOT / "install.ps1"),
+                            "-Source", str(selected_source)]
+                    args += [{"dry": "-DryRun", "legacy": "-MigrateLegacy"}[f] for f in flags]
+                else:
+                    exe = git_bash()
+                    if not exe:
+                        self.skipTest("Bash unavailable")
+                    args = [exe, shell_path(ROOT / "install.sh"), "--source", shell_path(selected_source)]
+                    args += [{"dry": "--dry-run", "legacy": "--migrate-legacy"}[f] for f in flags]
+                env = dict(os.environ, TMP=str(TEMP), TEMP=str(TEMP), TMPDIR=shell_path(TEMP))
+                return subprocess.run(args, cwd=target, capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", timeout=90, env=env)
+
+            for flag in ("legacy",):
+                result = invoke(flag)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("README", result.stdout + result.stderr)
+                self.assertEqual(snapshot(target), before)
+            result = invoke("dry")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("nothing was changed", result.stdout)
+            self.assertEqual(snapshot(target), before)
+            # Application files cause refusal even if a toolkit source is unavailable.
+            write(target / "app.py", "print('application')\n")
+            app_snapshot = snapshot(target)
+            result = invoke(selected_source=root / "missing")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Existing project", result.stdout + result.stderr)
+            self.assertEqual(snapshot(target), app_snapshot)
+            (target / "app.py").unlink()
+            for marker in ("PLAN.md", "TASKS.md", "AGENTS.md", "CLAUDE.md", ".agent-toolkit-manifest.tsv"):
+                write(target / marker, "existing project state\n")
+                existing = snapshot(target)
+                result = invoke("dry")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Existing project", result.stdout + result.stderr)
+                self.assertEqual(snapshot(target), existing)
+                (target / marker).unlink()
+            # A nested protected source is refused before any install writes.
+            write(source / ".agents" / ".env.fixture", "SYNTHETIC_SENTINEL\n")
+            result = invoke()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("SYNTHETIC_SENTINEL", result.stdout + result.stderr)
+            self.assertEqual(snapshot(target), before)
+            (source / ".agents" / ".env.fixture").unlink()
+            # A source hardlink is also refused before any install writes.
+            original = root / "ordinary-source.txt"
+            original.write_text("synthetic link fixture", encoding="utf-8")
+            linked = source / ".agents" / "linked.md"
+            os.link(original, linked)
+            result = invoke()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(snapshot(target), before)
+            linked.unlink()
+            result = invoke()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for name, data in before.items():
+                self.assertEqual((target / name).read_bytes(), data)
+            self.assertTrue((target / ".agents/docs/AGENT_WORKFLOWS.md").exists())
+            self.assertTrue((target / ".claude/skills/demo/SKILL.md").exists())
+            self.assertTrue((target / ".codex/agents/executor.toml").exists())
+            self.assertFalse((target / "docs").exists())
+            self.assertFalse((target / ".agents/skills/demo/__pycache__").exists())
+            self.assertFalse((target / "PLAN.md").exists())
+            self.assertIn("local-unversioned", (target / ".agent-toolkit-manifest.tsv").read_text(encoding="utf-8"))
+            installed = snapshot(target)
+            result = invoke()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Existing project", result.stdout + result.stderr)
+            self.assertEqual(snapshot(target), installed)
+
+    def test_powershell_clean_install_and_refusals(self):
+        self.exercise("powershell")
+
+    def test_bash_clean_install_and_refusals(self):
+        self.exercise("bash")
+
+    def test_bash_download_uses_physical_temporary_directory(self):
+        bash = git_bash()
+        if not bash:
+            self.skipTest("Bash unavailable")
+        with tempfile.TemporaryDirectory(dir=TEMP) as temp:
+            root = Path(temp)
+            source = source_at(root)
+            physical = root / "physical-temp"
+            physical.mkdir()
+            linked = root / "linked-temp"
+            try:
+                linked.symlink_to(physical, target_is_directory=True)
+            except OSError:
+                self.skipTest("Directory symlinks unavailable on this Windows host")
             target = root / "target"
             target.mkdir()
-            _write(target / "project.txt", "keep\n")
+            script = root / "standalone/install.sh"
+            script.parent.mkdir()
+            shutil.copyfile(ROOT / "install.sh", script)
+            shim = root / "bin/git"
+            write(shim, '#!/bin/sh\n[ "$1" = clone ] || exit 1\n'
+                  'for destination do :; done\n'
+                  'cp -R "$INSTALL_TEST_SOURCE/." "$destination"\n')
+            shim.chmod(0o755)
+            env = dict(os.environ, PATH=shell_path(shim.parent) + ":" + os.environ.get("PATH", ""),
+                       INSTALL_TEST_SOURCE=shell_path(source))
+            # Do not resolve the synthetic link before giving it to the installer.
+            logical = linked.absolute().as_posix()
+            env["TMPDIR"] = "/" + logical[0].lower() + logical[2:] if os.name == "nt" else logical
+            env.pop("TK_SRC", None)
+            result = subprocess.run([bash, shell_path(script)], cwd=target, env=env,
+                                    capture_output=True, text=True, timeout=90)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((target / "AGENTS.md").exists())
+            self.assertEqual(list(physical.iterdir()), [])
 
-            dry = invoke(source, target, ["dry-run"])
-            self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
-            self.assertIn("nothing was changed", dry.stdout)
-            self.assertFalse((target / ".agent-toolkit-manifest.tsv").exists())
-
-            first = invoke(source, target, [])
-            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-            self.assertEqual((target / "project.txt").read_text(encoding="utf-8"), "keep\n")
-            self.assertFalse((target / ".git").exists())
-            self.assertTrue((target / ".agent-toolkit-manifest.tsv").exists())
-            self.assertTrue((target / ".claude" / "skills" / "demo" / "SKILL.md").exists())
-            self.assertIn(
-                ".agent-toolkit-backup/",
-                (target / ".gitignore").read_text(encoding="utf-8"),
-            )
-
-            second = invoke(source, target, [])
-            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
-            self.assertIn("UNCHANGED", second.stdout)
-
-            _write(source / ".claude" / "agents" / "executor.md", "updated role\n")
-            role_update = invoke(source, target, [])
-            self.assertEqual(
-                role_update.returncode, 0, role_update.stdout + role_update.stderr
-            )
-            self.assertEqual(
-                (target / ".claude" / "agents" / "executor.md").read_text(
-                    encoding="utf-8"
-                ),
-                "updated role\n",
-            )
-
-            before_agents = (target / "AGENTS.md").read_bytes()
-            _write(target / "docs" / "POLICY.md", "local customization\n")
-            _write(source / "AGENTS.md", "candidate agents v2\n")
-            conflict = invoke(source, target, [])
-            self.assertEqual(conflict.returncode, 2, conflict.stdout + conflict.stderr)
-            self.assertIn("locally modified", conflict.stdout + conflict.stderr)
-            self.assertEqual((target / "AGENTS.md").read_bytes(), before_agents)
-
-            _write(target / "docs" / "POLICY.md", "policy\n")
-            authoritative = invoke(source, target, [])
-            self.assertEqual(
-                authoritative.returncode, 0, authoritative.stdout + authoritative.stderr
-            )
-            self.assertEqual(
-                (target / "AGENTS.md").read_text(encoding="utf-8"), "candidate agents v2\n"
-            )
-
-    def test_powershell_lifecycle(self) -> None:
-        executable = shutil.which("powershell.exe") or shutil.which("pwsh")
-        if not executable:
-            self.skipTest("PowerShell is unavailable")
-
-        def invoke(source: Path, target: Path, flags: list[str]):
-            args = [
-                executable,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(ROOT / "install.ps1"),
-                "-Source",
-                str(source),
-            ]
-            if "dry-run" in flags:
-                args.append("-DryRun")
-            return subprocess.run(
-                args,
-                cwd=target,
-                text=True,
-                capture_output=True,
-                timeout=60,
-                check=False,
-            )
-
-        self._assert_lifecycle(invoke)
-
-    def test_bash_lifecycle(self) -> None:
-        executable = _git_bash()
-        if not executable:
-            self.skipTest("Bash is unavailable")
-
-        def invoke(source: Path, target: Path, flags: list[str]):
-            args = [
-                str(executable),
-                _shell_path(ROOT / "install.sh"),
-                "--source",
-                _shell_path(source),
-            ]
-            if "dry-run" in flags:
-                args.append("--dry-run")
-            return subprocess.run(
-                args,
-                cwd=target,
-                text=True,
-                capture_output=True,
-                timeout=60,
-                check=False,
-            )
-
-        self._assert_lifecycle(invoke)
-
-    def test_legacy_hash_matches_available_baseline(self) -> None:
-        legacy = ROOT / "AGENTS_WORKFLOW_LEGACY" / "AGENTS_v1.md"
-        if not legacy.exists():
-            self.skipTest("legacy baseline is not present in this checkout")
-        legacy_bytes = legacy.read_bytes().replace(b"\r\n", b"\n")
-        digests = {
-            hashlib.sha256(legacy_bytes).hexdigest(),
-            hashlib.sha256(legacy_bytes.replace(b"\n", b"\r\n")).hexdigest(),
-        }
-        for name in ("install.ps1", "install.sh"):
-            installer = (ROOT / name).read_text(encoding="utf-8").lower()
-            for digest in digests:
-                self.assertIn(digest, installer, name)
-
-    def test_installers_fetch_only_the_pinned_toolkit_repo(self) -> None:
-        for name in ("install.ps1", "install.sh"):
-            text = (ROOT / name).read_text(encoding="utf-8").lower()
-            self.assertIn("git clone", text, name)
-            self.assertIn("https://github.com/", text, name)
-            self.assertIn("evgenver/agents-tollkit", text, name)
-
-    def test_legacy_migration_is_automatic_and_creates_backup(self) -> None:
-        legacy = ROOT / "AGENTS_WORKFLOW_LEGACY" / "AGENTS_v1.md"
-        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
-        bash = _git_bash()
-        if not legacy.exists() or (not powershell and not bash):
-            self.skipTest("legacy baseline or installer shells are unavailable")
-
-        installers = []
-        if powershell:
-            installers.append(
-                (
-                    "powershell",
-                    lambda source, target, migrate: subprocess.run(
-                        [
-                            powershell,
-                            "-NoProfile",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-File",
-                            str(ROOT / "install.ps1"),
-                            "-Source",
-                            str(source),
-                            *(["-MigrateLegacy"] if migrate else []),
-                        ],
-                        cwd=target,
-                        text=True,
-                        capture_output=True,
-                        timeout=60,
-                        check=False,
-                    ),
-                )
-            )
-        if bash:
-            installers.append(
-                (
-                    "bash",
-                    lambda source, target, migrate: subprocess.run(
-                        [
-                            str(bash),
-                            _shell_path(ROOT / "install.sh"),
-                            "--source",
-                            _shell_path(source),
-                            *(["--migrate-legacy"] if migrate else []),
-                        ],
-                        cwd=target,
-                        text=True,
-                        capture_output=True,
-                        timeout=60,
-                        check=False,
-                    ),
-                )
-            )
-
-        for name, invoke in installers:
-            with self.subTest(installer=name), tempfile.TemporaryDirectory() as temp:
-                root = Path(temp)
-                source = _minimal_source(root)
-                target = root / "target"
-                target.mkdir()
-                shutil.copy2(legacy, target / "AGENTS.md")
-                _write(target / "project.txt", "keep\n")
-
-                migrated = invoke(source, target, False)
-                self.assertEqual(migrated.returncode, 0, migrated.stdout + migrated.stderr)
-                backups = list(
-                    (target / ".agent-toolkit-backup").glob("*/AGENTS.md")
-                )
-                self.assertEqual(len(backups), 1)
-                self.assertEqual(
-                    hashlib.sha256(backups[0].read_bytes()).hexdigest(),
-                    hashlib.sha256(legacy.read_bytes()).hexdigest(),
-                )
-                self.assertEqual(
-                    (target / "project.txt").read_text(encoding="utf-8"), "keep\n"
-                )
-
-    def test_previous_modular_migration_creates_backup(self) -> None:
-        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
-        bash = _git_bash()
-        if not powershell and not bash:
-            self.skipTest("no supported installer shell is available")
-
-        old_agents = subprocess.check_output(
-            ["git", "show", "59f7cbc:AGENTS.md"], cwd=ROOT
-        )
-        old_skill = subprocess.check_output(
-            [
-                "git",
-                "show",
-                "59f7cbc:.agents/skills/ai-eval-design/SKILL.md",
-            ],
-            cwd=ROOT,
-        )
-        old_workflows = subprocess.check_output(
-            ["git", "show", "59f7cbc:docs/AGENT_WORKFLOWS.md"], cwd=ROOT
-        )
-        old_evals = subprocess.check_output(
-            ["git", "show", "59f7cbc:docs/EVALS.md"], cwd=ROOT
-        )
-        old_bug_skill = subprocess.check_output(
-            ["git", "show", "59f7cbc:.agents/skills/bug-forensics/SKILL.md"],
-            cwd=ROOT,
-        )
-        installers = []
-        if powershell:
-            installers.append(
-                (
-                    "powershell",
-                    lambda source, target: subprocess.run(
-                        [
-                            powershell,
-                            "-NoProfile",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-File",
-                            str(ROOT / "install.ps1"),
-                            "-Source",
-                            str(source),
-                        ],
-                        cwd=target,
-                        text=True,
-                        capture_output=True,
-                        timeout=60,
-                        check=False,
-                    ),
-                )
-            )
-        if bash:
-            installers.append(
-                (
-                    "bash",
-                    lambda source, target: subprocess.run(
-                        [
-                            str(bash),
-                            _shell_path(ROOT / "install.sh"),
-                            "--source",
-                            _shell_path(source),
-                        ],
-                        cwd=target,
-                        text=True,
-                        capture_output=True,
-                        timeout=60,
-                        check=False,
-                    ),
-                )
-            )
-
-        for name, invoke in installers:
-            with self.subTest(installer=name), tempfile.TemporaryDirectory() as temp:
-                root = Path(temp)
-                source = ROOT
-                target = root / "target"
-                target.mkdir()
-                old_agents_custom = old_agents + b"\nlocal customization\n"
-                (target / "AGENTS.md").write_bytes(old_agents_custom)
-                skill_target = target / ".claude" / "skills" / "ai-eval-design" / "SKILL.md"
-                skill_target.parent.mkdir(parents=True, exist_ok=True)
-                skill_target.write_bytes(old_skill)
-                workflows_target = target / "docs" / "AGENT_WORKFLOWS.md"
-                workflows_target.parent.mkdir(parents=True, exist_ok=True)
-                workflows_target.write_bytes(old_workflows)
-                bug_skill_target = target / ".agents" / "skills" / "bug-forensics" / "SKILL.md"
-                bug_skill_target.parent.mkdir(parents=True, exist_ok=True)
-                bug_skill_target.write_bytes(old_bug_skill)
-                _write(target / "project.txt", "keep\n")
-
-                migrated = invoke(source, target)
-                self.assertEqual(migrated.returncode, 0, migrated.stdout + migrated.stderr)
-                backups = list(
-                    (target / ".agent-toolkit-backup").glob("*/AGENTS.md")
-                )
-                self.assertEqual(len(backups), 1)
-                self.assertEqual(backups[0].read_bytes(), old_agents_custom)
-                self.assertEqual(
-                    (target / "project.txt").read_text(encoding="utf-8"), "keep\n"
-                )
-
-                strict_target = root / "strict-target"
-                strict_target.mkdir()
-                (strict_target / "AGENTS.md").write_bytes(old_agents)
-                strict_evals = strict_target / "docs" / "EVALS.md"
-                strict_evals.parent.mkdir(parents=True, exist_ok=True)
-                strict_evals.write_bytes(old_evals + b"\nlocal customization\n")
-                strict = invoke(source, strict_target)
-                self.assertEqual(2, strict.returncode, strict.stdout + strict.stderr)
-                self.assertEqual((strict_target / "AGENTS.md").read_bytes(), old_agents)
-
-    def test_unverified_modular_migration_uses_backup_fallback(self) -> None:
-        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
-        bash = _git_bash()
-        if not powershell and not bash:
-            self.skipTest("no supported installer shell is available")
-
-        installers = []
-        if powershell:
-            installers.append(
-                (
-                    "powershell",
-                    lambda source, target: subprocess.run(
-                        [
-                            powershell,
-                            "-NoProfile",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-File",
-                            str(ROOT / "install.ps1"),
-                            "-Source",
-                            str(source),
-                        ],
-                        cwd=target,
-                        text=True,
-                        capture_output=True,
-                        timeout=60,
-                        check=False,
-                    ),
-                )
-            )
-        if bash:
-            installers.append(
-                (
-                    "bash",
-                    lambda source, target: subprocess.run(
-                        [
-                            str(bash),
-                            _shell_path(ROOT / "install.sh"),
-                            "--source",
-                            _shell_path(source),
-                        ],
-                        cwd=target,
-                        text=True,
-                        capture_output=True,
-                        timeout=60,
-                        check=False,
-                    ),
-                )
-            )
-
-        old_files = {
-            "AGENTS.md": "old custom router\n",
-            "docs/AGENT_WORKFLOWS.md": "old workflow\n",
-            ".agents/skills/bug-forensics/SKILL.md": "old bug skill\n",
-            ".claude/commands/orchestrate.md": "old command\n",
-            ".claude/skills/bug-forensics/SKILL.md": "old generated skill\n",
-            ".claude/agents/executor.md": "old executor\n",
-            ".codex/agents/executor.toml": "old executor\n",
-        }
-        for name, invoke in installers:
-            with self.subTest(installer=name), tempfile.TemporaryDirectory() as temp:
-                root = Path(temp)
-                source = ROOT
-                target = root / "target"
-                target.mkdir()
-                for rel, value in old_files.items():
-                    _write(target / rel, value)
-
-                migrated = invoke(source, target)
-                self.assertEqual(migrated.returncode, 0, migrated.stdout + migrated.stderr)
-                self.assertIn("REPLACE_UNVERIFIED", migrated.stdout)
-                backups = list(
-                    (target / ".agent-toolkit-backup").glob("*/docs/AGENT_WORKFLOWS.md")
-                )
-                self.assertEqual(len(backups), 1)
-                self.assertEqual(backups[0].read_text(encoding="utf-8"), "old workflow\n")
+    def test_real_toolkit_install_matches_both_skill_copies(self):
+        exe = shutil.which("pwsh") or shutil.which("powershell")
+        if not exe:
+            self.skipTest("PowerShell unavailable")
+        with tempfile.TemporaryDirectory(dir=TEMP) as temp:
+            target = Path(temp)
+            result = subprocess.run([exe, "-NoProfile", "-NonInteractive", "-File", str(ROOT / "install.ps1"),
+                                     "-Source", str(ROOT)], cwd=target, capture_output=True,
+                                    text=True, encoding="utf-8", errors="replace", timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for original in (ROOT / ".agents/skills").glob("*/SKILL.md"):
+                for directory in (".agents/skills", ".claude/skills"):
+                    self.assertEqual(original.read_bytes(),
+                        (target / directory / original.parent.name / "SKILL.md").read_bytes())
+            manifest = (target / ".agent-toolkit-manifest.tsv").read_text(encoding="utf-8")
+            self.assertIn("# source: git:", manifest)
+            self.assertFalse((target / "docs").exists())
 
 
 if __name__ == "__main__":

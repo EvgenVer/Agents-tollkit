@@ -22,22 +22,16 @@ class EvalCaseTests(unittest.TestCase):
             }
             self.assertEqual(keys, {"name", "description"}, path)
 
-    def test_orchestration_contract_contains_benefit_controls(self) -> None:
-        text = (
-            runner.ROOT / ".agents" / "skills" / "orchestration" / "SKILL.md"
-        ).read_text(encoding="utf-8")
-        for required in (
-            "ORCHESTRATION_NOT_BENEFICIAL",
-            "at least three meaningful active tasks",
-            "at least two tasks are ready",
-            "at least two ready tasks are executor-scale",
-            "capped at three",
-            "before waiting for any result",
-            "Do not dispatch a reviewer per successful task",
-            "Do not dispatch a fresh reviewer by default",
-            "Allow one correction iteration",
-        ):
-            self.assertIn(required, text)
+    def test_candidate_copies_canonical_skills_and_private_guides(self) -> None:
+        # Instruction behavior is exercised by scenario outcomes, not wording asserts.
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            runner._install_eval_toolkit(runner.ROOT, target)
+            self.assertFalse((target / "docs").exists())
+            self.assertTrue((target / ".agents/docs/AGENT_WORKFLOWS.md").exists())
+            for source in (runner.ROOT / ".agents/skills").glob("*/SKILL.md"):
+                copied = target / ".claude/skills" / source.parent.name / source.name
+                self.assertEqual(source.read_bytes(), copied.read_bytes())
 
     def test_case_catalog_is_valid_and_unique(self) -> None:
         cases = runner._load_cases()

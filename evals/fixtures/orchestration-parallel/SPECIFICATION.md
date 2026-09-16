@@ -34,6 +34,10 @@ normalized field names are invalid.
 
 - No third-party dependencies.
 
+## Constraints and non-goals
+
+Use the Python standard library and local fixtures only; no external services.
+
 ## Acceptance
 
 All existing and integration tests pass.

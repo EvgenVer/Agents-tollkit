@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 import random
 import re
 import shutil
 import statistics
+import stat
 import subprocess
 import sys
 import tarfile
@@ -87,6 +89,7 @@ class RunResult:
     source_identity: str
     provider_result: ProviderResult
     grade: GradeResult
+    workspace_path: str | None = None
 
 
 def _run(
@@ -189,8 +192,11 @@ def _copy_path(source: Path, destination: Path) -> None:
 
 
 def _install_eval_toolkit(source: Path, target: Path) -> None:
-    for relative in ("AGENTS.md", "CLAUDE.md", "docs", ".agents"):
+    for relative in ("AGENTS.md", "CLAUDE.md", ".agents"):
         _copy_path(source / relative, target / relative)
+    if not (source / ".agents/docs").exists():
+        # Historical baselines used root docs; the current layout leaves it project-owned.
+        _copy_path(source / "docs", target / "docs")
     for relative in (
         ".claude/commands",
         ".claude/agents",
@@ -212,6 +218,12 @@ def _materialize_variant(
     candidate_root: Path,
     temp_root: Path,
 ) -> str:
+    if variant == "minimal":
+        source = ROOT / "evals" / "minimal-agents.md"
+        shutil.copy2(source, target / "AGENTS.md")
+        (target / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+        return f"sha256:{_hash_file(source)}"
+
     if variant == "legacy":
         if not legacy_file.exists():
             raise EvalError(f"legacy baseline does not exist: {legacy_file}")
@@ -253,7 +265,40 @@ def _init_fixture_repo(path: Path) -> None:
             )
 
 
+def _unsafe_workspace_paths(root: Path) -> list[str]:
+    """Detect redirects/protected entries without opening their contents."""
+    unsafe = []
+    protected = re.compile(r"(?i)^(?:\.env.*|id_rsa.*|.*\.(?:pem|key|p12)|"
+                           r"secrets|\.ssh|\.aws|\.azure|gcloud|credentials|token-store)$")
+    def redirected(path):
+        info = path.lstat()
+        return path.is_symlink() or bool(getattr(info, "st_file_attributes", 0)
+                                        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+    if redirected(root):
+        return ["."]
+    for directory, names, files in os.walk(root, followlinks=False):
+        for name in names[:]:
+            path = Path(directory) / name
+            if name in IGNORED_SNAPSHOT_PARTS:
+                names.remove(name)
+            elif protected.fullmatch(name.rstrip(" .")) or redirected(path):
+                unsafe.append(path.relative_to(root).as_posix())
+                names.remove(name)
+        for name in files:
+            if name in IGNORED_SNAPSHOT_PARTS:
+                continue
+            path = Path(directory) / name
+            info = path.lstat()
+            if (protected.fullmatch(name.rstrip(" .")) or redirected(path)
+                    or info.st_nlink != 1 or not stat.S_ISREG(info.st_mode)):
+                unsafe.append(path.relative_to(root).as_posix())
+    return unsafe
+
+
 def _snapshot(path: Path) -> dict[str, str]:
+    unsafe = _unsafe_workspace_paths(path)
+    if unsafe:
+        return {name: "protected-or-link" for name in unsafe}
     snapshot: dict[str, str] = {}
     for item in sorted(path.rglob("*")):
         relative = item.relative_to(path)
@@ -288,7 +333,7 @@ def _eval_workspace_root(artifacts: Path) -> Path:
 
 
 @contextmanager
-def _temporary_eval_root(artifacts: Path) -> Iterator[Path]:
+def _temporary_eval_root(artifacts: Path, *, keep: bool = False) -> Iterator[Path]:
     temp_root = _eval_workspace_root(artifacts) / f"toolkit-eval-{uuid4().hex}"
     # tempfile.mkdtemp uses an owner-only ACL on Windows. A normal directory
     # inherits the project ACL required by Codex's restricted sandbox token.
@@ -296,7 +341,8 @@ def _temporary_eval_root(artifacts: Path) -> Iterator[Path]:
     try:
         yield temp_root
     finally:
-        shutil.rmtree(temp_root, ignore_errors=True)
+        if not keep:
+            shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def _json_events(stdout: str) -> list[dict[str, Any]]:
@@ -714,17 +760,15 @@ def _grade(
         return GradeResult(passed=False, checks=checks)
 
     grade = case.get("grade", {})
-    workspace_links = [
-        item.relative_to(workspace).as_posix()
-        for item in workspace.rglob("*")
-        if item.is_symlink()
-    ]
+    workspace_links = _unsafe_workspace_paths(workspace)
     _check(
         checks,
-        "workspace contains no symbolic links",
+        "workspace contains no redirects or protected entries",
         not workspace_links,
         f"links={workspace_links}",
     )
+    if workspace_links:
+        return GradeResult(passed=False, checks=checks)
     changed = sorted(
         path
         for path in set(before) | set(after)
@@ -771,6 +815,21 @@ def _grade(
             forbidden not in content,
             f"forbidden={forbidden!r}",
         )
+
+    for relative, expected_values in grade.get("file_contains_all", {}).items():
+        path = workspace / relative
+        content = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+        _check(checks, f"{relative} preserves required references",
+               all(value in content for value in expected_values), str(expected_values))
+    for relative, source in grade.get("file_equals_source", {}).items():
+        target, reference = workspace / relative, workspace / source
+        _check(checks, f"{relative} matches reviewed source",
+               target.is_file() and reference.is_file() and _hash_file(target) == _hash_file(reference), source)
+    for pattern, source in grade.get("file_equals_fixture", {}).items():
+        reference = ROOT / "evals/fixtures" / case["fixture"] / source
+        matches = [path for path in workspace.glob(pattern) if path.is_file()]
+        _check(checks, f"{pattern} preserves original",
+               any(_hash_file(path) == _hash_file(reference) for path in matches), source)
 
     required_final = grade.get("final_contains")
     if required_final:
@@ -856,6 +915,34 @@ def _grade(
                 f"actual={provider.review_skill_read_count}, min={minimum}",
             )
 
+    contract = grade.get("document_contract")
+    if contract is not None and not workspace_links:
+        # Load the trusted harness checker, never a module supplied by the agent.
+        checker_path = ROOT / ".agents/skills/planning/scripts/check_docs.py"
+        spec = importlib.util.spec_from_file_location("eval_document_checker", checker_path)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        state = checker.inspect_project(workspace)
+        _check(checks, "canonical documents", state["valid"], str(state["diagnostics"]))
+        tasks = {task["id"]: task for task in state["tasks"]}
+        for task_id, fields in contract.get("tasks", {}).items():
+            actual = tasks.get(task_id, {})
+            _check(checks, f"task {task_id} state",
+                   all(set(value).issubset(actual.get("after", [])) if key == "after_includes"
+                       else actual.get(key) == value for key, value in fields.items()),
+                   f"expected={fields}; actual={actual}")
+        for key, value in contract.get("current", {}).items():
+            _check(checks, f"current {key}", state["current"].get(key) == value,
+                   f"expected={value}; actual={state['current'].get(key)}")
+        for phase in contract.get("completed_phases", []):
+            rows = [task for task in state["tasks"] if task["phase"] == str(phase)]
+            _check(checks, f"phase {phase} recorded complete", bool(rows) and all(
+                task["status"] == "done" and task["result"] == "passed" for task in rows),
+                str(rows))
+        for phase in contract.get("undecomposed_phases", []):
+            rows = [task for task in state["tasks"] if task["phase"] == str(phase)]
+            _check(checks, f"phase {phase} remains coarse", not rows, str(rows))
+
     hidden_output = ""
     hidden_relative = case.get("hidden")
     if hidden_relative and not workspace_links:
@@ -931,20 +1018,35 @@ def _single_run(
     seed: int,
     args: argparse.Namespace,
 ) -> RunResult:
-    with _temporary_eval_root(args.artifacts) as temp_root:
+    keep = bool(getattr(args, "keep_workspaces", False))
+    with _temporary_eval_root(args.artifacts, keep=keep) as temp_root:
         workspace = temp_root / "workspace"
         fixture = ROOT / "evals" / "fixtures" / case["fixture"]
         if not fixture.exists():
             raise EvalError(f"fixture not found: {fixture}")
         _copy_path(fixture, workspace)
-        source_identity = _materialize_variant(
-            variant,
-            workspace,
-            legacy_file=args.legacy_file,
-            current_ref=args.current_ref,
-            candidate_root=args.candidate_root,
-            temp_root=temp_root,
-        )
+        if case.get("toolkit_update"):
+            if variant != "candidate":
+                raise EvalError("toolkit-update fixtures support candidate only")
+            source = workspace / ".toolkit-update-source"
+            _install_eval_toolkit(args.candidate_root, source)
+            _copy_path(args.candidate_root / "README.md", source / "README.md")
+            source_identity = "agent-led-update:" + _hash_file(source / "AGENTS.md")
+        else:
+            source_identity = _materialize_variant(
+                variant,
+                workspace,
+                legacy_file=args.legacy_file,
+                current_ref=args.current_ref,
+                candidate_root=args.candidate_root,
+                temp_root=temp_root,
+            )
+        for skill in case.get("fixture_skills", []):
+            if not re.fullmatch(r"[a-z][a-z0-9-]*", skill):
+                raise EvalError("invalid fixture skill name")
+            source = fixture / ".agents" / "skills" / skill
+            for directory in (".agents/skills", ".claude/skills"):
+                _copy_path(source, workspace / directory / skill)
         _init_fixture_repo(workspace)
         before = _snapshot(workspace)
 
@@ -994,6 +1096,7 @@ def _single_run(
             source_identity=source_identity,
             provider_result=provider_result,
             grade=grade,
+            workspace_path=str(workspace) if keep else None,
         )
 
 
@@ -1397,6 +1500,18 @@ def _comparison_gates(
                 baseline_variant="current",
             )
 
+    minimal_ids = [case["id"] for case in cases if case["suite"] == "workflow"
+                   and {"minimal", "candidate"}.issubset(case["variants"])]
+    if minimal_ids:
+        add_noninferiority_gate(name="workflow-vs-minimal", case_ids=minimal_ids,
+                               baseline_variant="minimal")
+    continuation_ids = [case["id"] for case in cases if case["suite"] == "workflow"
+                        and "legacy" not in case["variants"]
+                        and {"current", "candidate"}.issubset(case["variants"])]
+    if continuation_ids:
+        add_noninferiority_gate(name="continuation-vs-current", case_ids=continuation_ids,
+                               baseline_variant="current")
+
     sequential_case = next(
         (
             case
@@ -1606,7 +1721,23 @@ def _deserialize_run_result(raw: dict[str, Any]) -> RunResult:
         source_identity=raw["source_identity"],
         provider_result=provider,
         grade=GradeResult(**raw["grade"]),
+        workspace_path=raw.get("workspace_path"),
     )
+
+
+def _benchmark_fingerprint(candidate_root: Path) -> str:
+    inputs = {}
+    for name in ("cases.json", "runner.py", "minimal-agents.md"):
+        inputs[f"evals/{name}"] = _hash_file(ROOT / "evals" / name)
+    for name in ("fixtures", "hidden"):
+        inputs[f"evals/{name}"] = _snapshot(ROOT / "evals" / name)
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        path = candidate_root / name
+        inputs[name] = _hash_file(path) if path.exists() else None
+    for name in (".agents", ".claude/commands", ".claude/agents", ".codex/agents"):
+        path = candidate_root / name
+        inputs[name] = _snapshot(path) if path.exists() else None
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _load_baseline_results(
@@ -1629,6 +1760,7 @@ def _load_baseline_results(
         "runs_per_case": args.runs,
         "seed": args.seed,
         "current_ref": args.current_ref,
+        "benchmark_fingerprint": _benchmark_fingerprint(args.candidate_root),
     }
     reused: dict[tuple[str, str, int], RunResult] = {}
     for path in paths:
@@ -1675,7 +1807,7 @@ def _merge_results(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compare legacy, current, and candidate toolkit behavior."
+        description="Compare minimal, legacy, current, and candidate toolkit behavior."
     )
     parser.add_argument(
         "--suite",
@@ -1683,7 +1815,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="smoke",
     )
     parser.add_argument("--provider", choices=("codex", "claude"), required=True)
-    parser.add_argument("--variant", action="append", choices=("legacy", "current", "candidate"))
+    parser.add_argument("--variant", action="append", choices=("minimal", "legacy", "current", "candidate"))
     parser.add_argument("--case", action="append", help="Run only a named case.")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument(
@@ -1748,6 +1880,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Acknowledge the bounded provider run without an interactive prompt.",
     )
     parser.add_argument("--list", action="store_true", help="List selected cases without running.")
+    parser.add_argument("--keep-workspaces", action="store_true",
+                        help="Retain isolated fixtures for manual outcome and handoff review.")
     return parser
 
 
@@ -1790,7 +1924,7 @@ def main(argv: list[str] | None = None) -> int:
     if enforce_gates and args.provider == "codex" and not args.model:
         parser.error("--model is required when comparison gates are enforced")
 
-    variants = args.variant or ["legacy", "current", "candidate"]
+    variants = args.variant or ["minimal", "legacy", "current", "candidate"]
     jobs, canary_key = _build_jobs(
         cases, variants, args.runs, args.seed, args.repetition
     )
@@ -1880,6 +2014,7 @@ def main(argv: list[str] | None = None) -> int:
     generated_at = datetime.now(timezone.utc).isoformat()
     payload = {
         "generated_at": generated_at,
+        "benchmark_fingerprint": _benchmark_fingerprint(args.candidate_root),
         "provider": args.provider,
         "provider_version": version,
         "model": args.model,

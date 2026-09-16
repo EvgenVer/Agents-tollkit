@@ -1,15 +1,16 @@
 # DESCRIPTION — Tiny CLI
 
-## Idea & intent
+## Purpose
+
 A small command-line tool that prints normalized text.
 
-## Target users
+## Audience
 Developers learning how to use the workflow toolkit.
 
-## Goals
+## Context
 - Keep the example deliberately small.
 - Use only the Python standard library.
 
-## Non-goals
+### Exclusions
 - No network services.
 - No third-party runtime dependencies.

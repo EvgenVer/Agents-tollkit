@@ -1,7 +1,7 @@
 # Local Claude Code settings (machine-specific)
 .claude/settings.local.json
 
-# Secrets / env (mirror docs/SECURITY.md protected list)
+# Secrets / env (mirror .agents/docs/SECURITY.md protected list)
 .env
 .env.*
 *.pem
@@ -28,6 +28,8 @@ evals/*
 !evals/__main__.py
 !evals/runner.py
 !evals/cases.json
+!evals/README.md
+!evals/minimal-agents.md
 !evals/fixtures/
 !evals/fixtures/**
 !evals/hidden/

@@ -154,7 +154,7 @@ class EvalRunnerTests(unittest.TestCase):
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0][2], 3)
 
-    def test_full_matrix_has_84_calls_and_starts_with_reused_write_canary(
+    def test_full_matrix_has_exact_selected_calls_and_reuses_write_canary(
         self,
     ) -> None:
         cases = runner._load_cases()
@@ -165,7 +165,12 @@ class EvalRunnerTests(unittest.TestCase):
             seed=20260724,
         )
 
-        self.assertEqual(len(jobs), 84)
+        expected = {(case["id"], variant, repetition)
+                    for case in cases for variant in ("legacy", "current", "candidate")
+                    if variant in case["variants"] for repetition in (1, 2, 3)}
+        self.assertEqual({(case["id"], variant, repetition)
+                          for case, variant, repetition, _ in jobs}, expected)
+        self.assertEqual(len(jobs), len(expected))
         self.assertEqual(
             canary,
             ("trivial-fast-path", "candidate", 1),
