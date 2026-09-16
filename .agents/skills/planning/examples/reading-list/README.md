@@ -6,7 +6,9 @@ Projects do not need to copy this example or maintain this walkthrough.
 
 | Event | Expected update |
 |---|---|
-| Enter phase 2 | Its atomic tasks already exist in TASKS. Start T3; no repeated phase approval. Phase 3 stays coarse in PLAN |
+| Enter phase 2 | Read Current, task/prerequisites, the phase and global constraints, then its Context pointers. Start T3 unless the user selects another ready task. Phase 3 stays coarse |
+| User selects T5 | T2 is verified, so use phase 2 context and the help requirement/check; T3 need not run first. Reuse unchanged context within the session |
+| A pointer is absent or stale | Find the specific missing requirement/interface in its source; repair a stale pointer. No new document or approval is needed for reading; actual missing decisions block affected work |
 | Finish T3 | Record the actual renderer check and result, set T3 to done, and start the first ready task, T4. PLAN stays unchanged |
 | Discover escaping is required before T4 | Insert T3.1 in phase 2 before T4. Give it its own check and prerequisite T3; add T3.1 to T4's After field. Row insertion alone does not establish this dependency |
 | T3 is blocked | Record `- T3: Reason: ...` below the table. T4 must wait; T5 can proceed because it requires only T2. Explain the switch |

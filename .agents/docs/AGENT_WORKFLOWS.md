@@ -8,25 +8,34 @@ and return here. No separate mode catalog or extra tracking documents are requir
 
 ```mermaid
 flowchart TD
-    A[Understand request and recover relevant context] --> B{Preparation needed?}
+    A[Understand request and execution boundary] --> B{Preparation needed?}
     B -- Read-only --> R[Answer]
     B -- New scope or missing decisions --> C[Prepare relevant documents and resolve decisions]
     C --> D{Execution authorized?}
     D -- No --> W[Present the missing decision or plan]
-    D -- Yes --> E[Choose first ready work]
+    D -- Yes --> E[Select target or authorized ready work]
     B -- Authorized bounded work --> E
     E -- Phase not decomposed --> F[Prepare that phase's tasks]
     F --> E
     E -- Scope complete --> Z[Report verified result]
     E -- Checkpoint or no safe work --> W
-    E -- Ready task --> G{Action permitted?}
-    G -- No --> H[Ask for missing permission and block affected work]
+    E -- Blocked task --> K
+    E -- Ready task --> N[Load task context and global constraints]
+    N --> Q{Context sufficient?}
+    Q -- Yes --> G{Action permitted?}
+    Q -- No --> X[Identify gap and read related section or code]
+    X -- Local evidence --> Q
+    X -- No justified next step --> K
+    X -- Decision needed --> H
+    X -- Scope or requirements changed --> C
+    G -- No --> H[Ask for missing input or permission and block affected work]
     H --> K[Save state and find independent authorized work]
     G -- Yes --> I[Implement and verify]
+    I -- Contradiction --> X
     I -- Failed --> J[Reassess evidence and approach]
     J -- Justified safe next step --> G
     J -- No justified next step --> K
-    I -- Passed --> L[Review and record result; consider MEMORY]
+    I -- Passed --> L[Review and record result; refresh affected pointers]
     L --> E
     K -- Available --> E
     K -- None --> W
@@ -36,15 +45,16 @@ flowchart TD
 
 | Event | Action |
 |---|---|
-| Entry/resume | Read relevant project state and eligible MEMORY entries; reconcile files, task state, evidence, and pending user questions |
+| Entry/resume | Use AGENTS's task-entry reading order and relevant MEMORY. Recover scope, checkpoints and pending questions; read DESCRIPTION when the idea or requirements need clarification |
 | Bounded authorized work | Use the existing task/request and relevant checks; do not bootstrap four documents or require a special exemption |
 | New requirements/architecture/scope | Prepare affected documents using planning. Ask only material unanswered questions; resolve missing approval before dependent implementation |
 | Start execution | An explicit execution instruction is sufficient, including “approved, execute”; preserve its scope and checkpoints |
 | Activate a phase | Decompose its outcome before code. Its declared preceding phases must be verified; a later phase with After: none explicitly permits independent work |
-| Select work | First ready task in row order in the active phase. Respect After prerequisites and known blockers; an omitted dependency is not evidence of independence |
+| Select work | Prefer the requested task; otherwise first ready in row order. Check task and phase prerequisites. If the target is blocked, explain and select authorized ready prerequisites or independent work; retain the target for resumption |
+| Context gap or contradiction | Name the missing behavior, constraint, interface, or verification fact; inspect the related source and callers/tests. Repair stale pointers by targeted search. Ask only for a material decision unavailable from evidence; block affected work |
 | Insert work | In-scope necessary work joins the right position. If it is a prerequisite, update dependent After fields. Put new product ideas in Proposals |
 | Before each action | Respect scope, permission, and checkpoints. See SECURITY for operation effects; missing permission is not a failed check |
-| Successful task | Inspect the diff and relevant checks, record actual result/evidence, update Current references, and continue. A progress message does not end the run |
+| Successful task | Review and record evidence, update Current and affected pointers, consider eligible MEMORY, and continue |
 | Close phase | Confirm the outcome using sufficient task evidence, clear completed Current task references, and check TASKS. Add a check task only for a distinct uncovered integration result |
 | Failed check | Reassess the hypothesis. Continue justified progress, not identical failed retries; a fixed failure count is not a stop condition |
 | Stuck or missing input | Explain and block affected work. Continue independent ready work; cross-phase work needs explicit independence in PLAN and inclusion in execution scope |
@@ -55,30 +65,20 @@ flowchart TD
 Use the planning skill's event-to-document table when requirements or route change.
 Reconcile affected documents before dependent work. Ordinary task progress updates TASKS,
 not every document. Current is a short resume pointer, not a duplicate status table.
+Context selection is internal work, not an approval gate or a reason to load planning.
+Without pointers, locate the relevant sections/code directly; bounded work needs no
+context scaffold. Retain applicable context across tasks; expand it when dependencies
+require more, including shared interfaces and global constraints omitted by a pointer.
 
 ## Verification and review
 
-Inspect unfamiliar checks for side effects. Use the smallest meaningful test set for
-the change; broaden for unresolved integration concerns, not for a fixed file count.
-Do not rerun a passing check without a relevant change. Reproduction and targeted
-regression evidence are appropriate for a bug; prose edits usually need a diff check.
-
-Every write gets a lightweight scope/diff/evidence check. Full code-review is for a
-concrete requested review, public/shared contracts, dependencies, sensitive boundaries,
-or integration risk. A standalone review remains findings-only; an authorized
-implementation may resolve its own review findings without another permission ritual.
-A fresh review can add confidence for a substantial/risky change when delegation is
-authorized. It does not grant permission to start parallel implementation.
-
-Run the read-only document checker after coherent structural changes, phase
-decomposition/closure, requirement/route changes, numbering/dependency edits, or migration.
-Correct errors before dependent work or a completion claim. If the checker is unavailable,
-compare with the template manually and disclose the limitation. Routine progress updates
-do not require repeating the same successful check on unchanged documents.
-The checker cannot prove evidence true, infer permission, or judge requirement coverage.
-
-Changed AI instructions need behavioral scenarios and honest coverage reporting;
-see [EVALS.md](EVALS.md). Offline tests are not proof of model behavior.
+Apply AGENTS's review and checker triggers and planning's structural-change checks.
+Inspect unfamiliar checks for side effects; broaden coverage for unresolved integration
+concerns. Standalone review is findings-only; authorized implementation may fix findings.
+Reuse sufficient unchanged evidence. The checker does not follow Context pointers or
+prove evidence, permission, or semantic coverage. Review relevant pointers when used
+or changed, within safety boundaries; no separate indexing or audit cycle is required.
+Evaluate changed AI behavior with [EVALS.md](EVALS.md); disclose unavailable coverage.
 
 ## MEMORY
 

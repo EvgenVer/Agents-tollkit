@@ -28,8 +28,11 @@ the file at the start of the session. Keep the file's rules project-neutral.
 Lite includes the canonical headings and PLAN/TASKS table formats. Bounded corrections
 use existing documents or the request; multi-step project work gets a written plan
 and task ledger. Document consistency is checked by the agent without an external
-script. Its behavior and total token savings have not yet been evaluated; the short
-minimal AGENTS used in the comparison is a different file, not this Lite version.
+script. A [bounded Luna comparison](evals/README.md#lite-comparison) found working
+results and valid document structure in 15/15 Lite attempts; 13/15 met every strict
+criterion. Total processed context fell, but uncached input plus output increased
+relative to the full toolkit; cost or account-limit savings are not established.
+The earlier minimal AGENTS baseline is a different file, not this Lite version.
 
 When moving from Lite to the full toolkit, use the existing-project update procedure
 below. Compatible document formats reduce rewriting; review actual documents and
@@ -100,6 +103,16 @@ headings; project prose can use the agreed language. PLAN contains no duplicate 
 status. TASKS is grouped by phase; decompose a phase before starting it, retain completed
 rows, and normally leave future phases coarse.
 
+For full-toolkit task entry, read Current, the requested task and prerequisites, its
+PLAN phase, and global constraints first. An optional `Context:` line before a phase's
+table points to relevant file sections or code directories; tasks inherit it. Add
+`- T4: Context: ...` below the table only for extra sources. These are reading pointers,
+not copied requirements, required inventories, or access permissions. Missing pointers
+do not block work. Follow dependencies, search for specific gaps, and reuse unchanged
+context within a session. Refresh affected pointers during ordinary source changes.
+The [selective-context comparison](evals/README.md#selective-context-comparison)
+preserved all 15 scenario passes; reduced total token usage is not established.
+
 Task table columns are **ID / Task / Status / After / Verification**. Rows express
 priority; After expresses actual prerequisites. Insert T7.1 before T8 if new work
 belongs there, and add T7.1 to T8's After when it is required. Do not create T7.1.1.
@@ -119,6 +132,7 @@ other coherent structural changes, not every progress note. Reuse an unchanged p
 result. The script reads only the four named documents and
 does not run project commands or edit files. It checks format and references; the
 agent still assesses task size, requirement coverage, permissions, and evidence truth.
+Context links are reviewed by the agent; the script does not follow their targets.
 
 The single [workflow graph](.agents/docs/AGENT_WORKFLOWS.md) defines selection,
 decomposition, verification, recovery, checkpoints, and continuation. A report explains

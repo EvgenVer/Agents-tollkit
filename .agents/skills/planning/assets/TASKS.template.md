@@ -18,6 +18,10 @@
 
 ### Phase 1
 
+<!-- Optional: one Context: line of relative file/section links or code paths here.
+     Tasks inherit it; use - T1: Context: ... below the table only for extra sources.
+     Omit when unhelpful. Keep pointers, not copied requirements or exhaustive file lists. -->
+
 | ID | Task | Status | After | Verification |
 |---|---|---|---|---|
 | T1 | <one verifiable outcome, including relevant checks> | todo | none | Check: <method and expected outcome>; Result: pending |

@@ -21,8 +21,12 @@
 
 ### Phase 2
 
+Context: [requirements](SPECIFICATION.md#requirements); [technical decisions](PLAN.md#technical-decisions).
+
 | ID | Task | Status | After | Verification |
 |---|---|---|---|---|
 | T3 | Render records as ordered Markdown links | todo | T2 | Check: compare full rendered output with the expected document; Result: pending |
 | T4 | Add the export command with safe failure behavior | todo | T3 | Check: CLI success, invalid input exit status, and existing-output preservation; Result: pending |
 | T5 | Explain command usage and errors in help | todo | T2 | Check: command help shows input/output arguments and failure behavior; Result: pending |
+
+- T4: Context: [failure acceptance](SPECIFICATION.md#acceptance).

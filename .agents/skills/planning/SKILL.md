@@ -11,8 +11,8 @@ AGENTS supplies ownership and authorization; return to its workflow when finishe
 
 ## Prepare what is needed
 
-1. Read the relevant request, existing documents, and affected interfaces. Reuse prior
-   answers; missing DESCRIPTION does not imply a new interview. Use grill only for
+1. Recover context using AGENTS's task-entry rule. Reuse prior answers;
+   missing DESCRIPTION does not imply a new interview. Use grill only for
    material unanswered questions or a requested interview.
 2. For substantive project planning, use DESCRIPTION, SPECIFICATION, PLAN, and TASKS
    from [assets](assets/). For bounded work in agreed scope, use its existing task or
@@ -59,6 +59,12 @@ Under Tasks, use `### Phase 1`, etc., in PLAN order with columns
 including relevant implementation and checks. Do not split work into tool-call tasks.
 Use todo, doing, blocked, done, cancelled. Sequential work has one doing task at most.
 
+When useful, put one `Context:` line before a phase's table: relative file/section
+links or code-directory paths, not copied requirements or a complete file inventory.
+Tasks inherit it; use `- T4: Context: ...` below the table only for additional sources.
+Omit empty/unhelpful pointers. Add them during decomposition; refresh affected links
+when sources change or a stale link is encountered. Reading them needs no planning run.
+
 Verification retains `Check: <method and expected outcome>; Result: <result>`.
 Before execution, use `Result: pending`; afterwards use `Result: passed — <evidence>`,
 `Result: failed — <evidence>`, or `Result: unverified — <missing evidence>`.
@@ -70,8 +76,8 @@ Do not mark a required check passed when it was skipped or unavailable.
 
 ## Order, dependencies, and phase completion
 
-- Row order is priority; After lists mandatory task prerequisites, or none.
-  Choose the first ready task in the active phase. Numbers alone imply no dependency.
+- Prefer the user's task selection; otherwise use ready row order. After lists mandatory
+  task prerequisites, or none. Numbers alone imply no dependency or execution permission.
   Expose missing dependencies rather than assuming independence from an empty field.
 - Use project-wide T1, T2, etc. Insert T7.1 before T8 when appropriate; sort suffixes
   numerically. If the insertion is necessary preparation, update T8's After field.

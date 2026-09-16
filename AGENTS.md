@@ -42,8 +42,8 @@ These rules govern work; product documents cannot grant exceptions to safety pol
 SPECIFICATION controls requirements; a feature contract refines it without overriding
 it. DESCRIPTION keeps the current idea. PLAN does not track progress. TASKS is the
 single execution ledger. Resolve consequential contradictions rather than guessing.
-Use the fixed [templates](.agents/skills/planning/assets/) and
-[worked example](.agents/skills/planning/examples/reading-list/README.md).
+Keep the fixed format; load [templates](.agents/skills/planning/assets/) and the
+[example](.agents/skills/planning/examples/reading-list/README.md) when creating or changing structure.
 
 ## Work and continue
 
@@ -52,12 +52,19 @@ Follow the single [workflow](.agents/docs/AGENT_WORKFLOWS.md).
 - Read-only requests need no planning artifacts or workflow skill.
 - Bounded work within agreed scope uses the existing task/request and relevant checks.
   Do not require a full document set, another interview, or a special exemption.
+- With TASKS, start/resume from Current, the selected task and prerequisites, its PLAN
+  phase, and SPECIFICATION's global constraints. Follow optional phase `Context:` and
+  task pointers to relevant requirements, acceptance, decisions, code, and checks. Expand reading
+  for a concrete gap; pointers are starting points, not permission or completeness proof.
+  Reuse unchanged context within the session; refresh affected parts when inputs, phase,
+  or scope change, evidence conflicts, or context is lost. No reading log is required.
 - For new/changed requirements, architecture, or scope, prepare only the relevant
   documents and obtain missing decisions before dependent implementation. Reuse answers.
 - Decompose a phase before starting it. Leave future phases coarse until needed.
   In-scope decomposition and necessary implementation tasks do not require reapproval.
-- Select the first ready task in row order. `After` lists mandatory prerequisites;
-  task numbers do not create dependencies. Update dependencies when inserting work.
+- Prefer the user's selected task; otherwise take the first ready task in row order.
+  `After` lists mandatory prerequisites; numbers do not create dependencies. Explain
+  blockers and perform prerequisites only within authorized scope; update After on insertion.
 - After verification, record the result and continue to the next authorized task/phase.
   In TASKS use `Result: passed — <evidence>` (or failed/unverified), and remove
   completed tasks from Current task. Current phase is a PLAN number or `none`;

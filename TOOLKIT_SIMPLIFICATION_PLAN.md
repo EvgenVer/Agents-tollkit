@@ -6,6 +6,45 @@ document consistency on these fixtures, not superior code quality or general aut
 
 ## Implementation progress
 
+- Selective task context implemented after explicit user authorization: full-toolkit
+  AGENTS defines task-entry reading and refresh rules; the existing workflow includes
+  a targeted gap/contradiction loop with decision, scope, permission, and stop exits.
+  User-selected tasks take priority subject to existing prerequisites and authorization.
+  Planning, the TASKS template, and the worked example use one optional Context line
+  per phase and task additions only where useful. Pointers locate original sources;
+  no copied requirements, new documents/skills/indexes, mandatory inventories, or
+  checker expansion. Missing pointers fall back to targeted reading. Repeated review
+  guidance was shortened while retaining its AGENTS triggers. Lite remains the measured
+  standalone revision. The authorized follow-up ran 15 Luna calls on the same five
+  cases, three repetitions, unchanged settings/rubric and no retries: all passed.
+  Against the preceding full toolkit across all 15: total input + output +0.9%,
+  uncached input + output -6.6%, median time 75.1s versus 71.5s. Total-context savings
+  are not established. These small fixtures have no initial Context pointers and do
+  not measure their benefit in large projects. All reports/checkpoints are saved;
+  the candidate fingerprint remained unchanged. [Results](.artifacts/evals/luna-context-20260916/findings.md).
+  Local verification: 44 existing checker/eval-harness tests ran (43 passed, one native
+  symlink test skipped); the updated worked example and 41 local links passed. Manual
+  review covered selected-task readiness, missing/stale pointers, global constraints,
+  context loss, and permission/scope exits. The standard skill validator remains
+  unavailable because PyYAML is absent; existing frontmatter/materialization tests pass.
+  Static verification added no dependencies or model calls. Core AGENTS/workflow/planning instructions grew
+  by about 6% combined; this is a word count, not a measured token-cost increase.
+
+- Lite behavioral follow-up completed on explicit user request: 15 new Luna calls,
+  the same five cases and three repetitions, CLI 0.154.0, low reasoning, 180 seconds,
+  no retries. All provider calls, functional checks, and canonical-structure checks
+  passed; 13/15 met every unchanged strict criterion. One blocked result changed from
+  pending to unverified; one PLAN function count was corrected from two to three outside
+  the grader's allowed file list. Neither shows broken functionality or publication;
+  preserve both failures and disclose the rubric limitation instead of rescoring.
+  Compared with the saved full-toolkit results: total input + output -15.1%, uncached
+  input + output +12.9%, median successful-call time 68.2s versus 71.5s. Cost/limit
+  savings are not established. Resume-note semantics remain a manual review gap in
+  both editions. All 15 reports, workspaces, and checkpoints are saved; source hashes
+  and the historical full benchmark matched before/after. No rule or grader changes.
+  [Lite findings and complete evidence](.artifacts/evals/luna-lite-20260916/findings.md).
+  README and eval guidance now describe the measured result and its limitations.
+
 - Lite edition implemented after the user's explicit approval: `lite/AGENTS.md` is
   a standalone 823-word, 5,887-character rule file. It retains project-neutral safety,
   proportional planning, canonical document headings and PLAN/TASKS tables, phase
@@ -15,8 +54,9 @@ document consistency on these fixtures, not superior code quality or general aut
   procedure. Full installers remain unchanged. The former Lite has 1,567 words;
   AGENTS_v1 has 4,370; word counts are not model token or total-runtime measurements.
   Checked the final prose/schema against existing templates, 37 local links, external
-  resource independence, and diff whitespace. No live Lite evaluation was authorized
-  or run; the earlier minimal baseline and full-toolkit scores do not describe Lite.
+  resource independence, and diff whitespace. At initial creation, no live Lite
+  evaluation was authorized or run; the subsequent authorized result is recorded above.
+  The earlier minimal baseline and full-toolkit scores do not describe Lite.
 - Lite coverage review against both legacy rule files restored verification planning
   before every edit, existing project conventions and simple solutions, and resolved
   target checks with dry-run/sample/backup protection for data-changing scripts.

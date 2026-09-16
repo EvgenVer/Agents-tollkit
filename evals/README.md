@@ -38,6 +38,46 @@ toolkit). "Current" is a pinned historical comparison, not automatically the new
 release; set --current-ref explicitly when comparing another reviewed release.
 Only variants named in each case are eligible. Default runs select all four variants.
 
+## Lite comparison
+
+The 823-word Lite at commit 1ab2e86 was evaluated on phase-continuation,
+phase-checkpoint, session-handoff, blocked-independent, and insert-prerequisite,
+three times each. Codex CLI 0.154.0, gpt-5.6-luna, low reasoning, 180 seconds/call,
+no retries. `--candidate-root lite` supplied only AGENTS.md; the trusted grader stayed
+outside the project. All 15 provider calls completed successfully.
+
+Lite passed functional and canonical-structure checks in 15/15 attempts and all strict
+checks in 13/15. The historical full-toolkit comparison scored 15/15. Both Lite failures
+were narrow rubric mismatches: changing a blocked result from pending to unverified,
+and correcting PLAN's function count from two to three when PLAN edits were excluded.
+Neither broke implementation, removed the publication blocker, or lost completed-task
+evidence. Original scores remain unchanged; they do not prove lower Lite quality.
+
+Versus the saved full-toolkit runs, Lite's total input plus output was 2,305,364 versus
+2,716,842 (-15.1%); uncached input plus output was 457,300 versus 405,162 (+12.9%).
+Median successful-call time was 68.2 versus 71.5 seconds. Different cache shares and
+measurement times limit interpretation; cost and account-limit savings are unmeasured.
+A stale Resume note also survived some runs of both editions despite structural passes.
+
+These are five small development-used fixtures with canonical starting documents,
+not a held-out study or evidence for other models/clients. Rules, fixtures, and rubric
+were frozen throughout. Full raw reports, checkpoints, hashes, and manual findings
+are retained locally under `.artifacts/evals/luna-lite-20260916/`; historical reports
+remain under `.artifacts/evals/luna-comparison-20260915/`.
+
+## Selective-context comparison
+
+The updated full toolkit ran the same five cases three times with the Lite comparison's
+CLI/model/settings and unchanged fixtures/rubric. All 15 calls and strict checks passed.
+Against the preceding full toolkit on all 15 attempts, total input plus output was
+2,740,061 versus 2,716,842 (+0.9%); uncached input plus output was 378,461 versus
+405,162 (-6.6%). Median time was 75.1 versus 71.5 seconds. General token savings are
+not established. The small fixtures have no initial Context pointers, so this does
+not measure prepared pointers on large projects. One generic Resume note survived.
+The candidate fingerprint stayed unchanged; all 15 checkpoints and raw reports are
+saved locally under `.artifacts/evals/luna-context-20260916/`. Its findings also compare
+all variants on 14 matched attempts with known usage; historical reports are unchanged.
+
 ## Bounded live runs
 
 Live runs consume provider/account usage and may use a metered API depending on the
