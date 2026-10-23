@@ -1,0 +1,9 @@
+{
+  "name": "studio",
+  "displayName": "Studio",
+  "version": "2.0.0",
+  "description": "Build your own apps with an autonomous agent: idea interview, architecture and plan, plain-language explainers, and safety hooks.",
+  "author": { "name": "EvgenVer" },
+  "repository": "https://github.com/EvgenVer/Agents-tollkit",
+  "keywords": ["planning", "explainers", "autonomy", "hooks"]
+}

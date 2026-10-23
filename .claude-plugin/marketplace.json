@@ -1,0 +1,12 @@
+{
+  "name": "agents-toolkit",
+  "description": "Personal toolkit for building apps with Claude Code and Codex",
+  "owner": { "name": "EvgenVer" },
+  "plugins": [
+    {
+      "name": "studio",
+      "source": "./plugins/studio",
+      "description": "Idea interview, architecture and plan, plain-language explainers, and safety hooks."
+    }
+  ]
+}

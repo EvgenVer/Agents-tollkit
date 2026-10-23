@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/studio_hooks.py\" session-start",
+            "commandWindows": "python -c \"import os,runpy,sys; sys.argv=['studio_hooks','session-start']; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'hooks','studio_hooks.py'), run_name='__main__')\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/studio_hooks.py\" guard",
+            "commandWindows": "python -c \"import os,runpy,sys; sys.argv=['studio_hooks','guard']; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'hooks','studio_hooks.py'), run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/studio_hooks.py\" stop",
+            "commandWindows": "python -c \"import os,runpy,sys; sys.argv=['studio_hooks','stop']; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'hooks','studio_hooks.py'), run_name='__main__')\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
