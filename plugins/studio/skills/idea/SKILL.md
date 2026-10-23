@@ -12,6 +12,7 @@ write `docs/PRODUCT.md` that they recognise as their idea and can approve.
 
 If the project root has no `AGENTS.md`, copy [assets/AGENTS.md](assets/AGENTS.md) and
 [assets/CLAUDE.md](assets/CLAUDE.md) there. If an `AGENTS.md` already exists, leave it.
+If the folder is not a git repository yet, initialise one.
 
 ## Interview
 
