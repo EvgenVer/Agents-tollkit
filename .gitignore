@@ -1,43 +1,11 @@
-# Local Claude Code settings (machine-specific)
+# Machine-specific Claude Code settings
 .claude/settings.local.json
 
-# Secrets / env (mirror .agents/docs/SECURITY.md protected list)
-.env
-.env.*
-*.pem
-*.key
-*.p12
-id_rsa*
-.ssh/
-secrets/
-.agent-toolkit-backup/
+# Python caches
+__pycache__/
+*.pyc
 
 # OS junk
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# Local evaluation artifacts
-.artifacts/
-__pycache__/
-
-# Versioned toolkit eval harness (the repository's local exclude historically ignores evals/)
-!evals/
-evals/*
-!evals/__init__.py
-!evals/__main__.py
-!evals/runner.py
-!evals/cases.json
-!evals/README.md
-!evals/minimal-agents.md
-!evals/fixtures/
-!evals/fixtures/**
-!evals/hidden/
-!evals/hidden/**
-evals/**/__pycache__/
-evals/**/*.pyc
-
-# Versioned legacy baseline used by the eval runner
-!AGENTS_WORKFLOW_LEGACY/
-AGENTS_WORKFLOW_LEGACY/*
-!AGENTS_WORKFLOW_LEGACY/AGENTS_v1.md
