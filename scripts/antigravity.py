@@ -3,37 +3,51 @@
 
 Usage: antigravity.py install | uninstall [--config DIR]
 
-install    Register plugins/studio in ~/.gemini/config/plugins.json, keeping other entries.
-           Restart Antigravity afterwards. `git pull` in this checkout updates the plugin.
-uninstall  Remove that registration.
+install    Link ~/.gemini/config/plugins/studio to plugins/studio of this checkout (a
+           junction on Windows, a symlink elsewhere). The IDE finds plugins only in that
+           folder. Restart Antigravity afterwards; `git pull` here updates the plugin.
+uninstall  Remove that link. The checkout itself is left alone.
 
 --config   The Antigravity settings folder (default: ~/.gemini/config).
 """
 
 import argparse
 import json
+import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
-PLUGINS = Path(__file__).resolve().parents[1] / "plugins"
-ENTRY = {"path": PLUGINS.as_posix(), "include_only": ["studio"]}
+PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "studio"
 
 
-def same_folder(entry):
+def link_target(path):
+    """Where a junction or symlink points, or None for anything else."""
     try:
-        return Path(str(entry.get("path", ""))).expanduser().resolve() == PLUGINS
-    except (OSError, AttributeError):
-        return False
+        target = os.readlink(path)
+    except (OSError, ValueError):
+        return None
+    return Path(target.removeprefix("\\\\?\\")).resolve()
 
 
-def load(path):
-    if not path.exists():
-        return {}
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
-    if not isinstance(data, dict) or not isinstance(data.get("entries", []), list):
-        raise ValueError("expected an object with an entries list")
-    return data
+def make_link(link):
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":  # a junction needs no administrator rights, unlike a symlink
+        result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(PLUGIN)],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            raise OSError((result.stderr or result.stdout).strip())
+    else:
+        link.symlink_to(PLUGIN, target_is_directory=True)
+
+
+def remove_link(link):
+    """Remove only the link itself: deleting the folder tree would empty the checkout."""
+    if os.name == "nt":
+        os.rmdir(link)
+    else:
+        link.unlink()
 
 
 def warnings(config):
@@ -66,36 +80,33 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     config = Path(args.config).expanduser()
-    target = config / "plugins.json"
-    try:
-        data = load(target)
-    except ValueError as error:
-        print(f"{target} is not valid ({error}); fix or move it, then run again.",
+    link = config / "plugins" / "studio"
+    target = link_target(link)
+    if os.path.lexists(link) and target is None:
+        print(f"{link} exists and is not a link; move it away, then run again.",
               file=sys.stderr)
         return 1
-    entries = [entry for entry in data.get("entries", []) if not same_folder(entry)]
 
     if args.action == "install":
-        data["entries"] = entries + [ENTRY]
-        config.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        print(f"registered {PLUGINS / 'studio'} in {target}")
+        if target != PLUGIN:
+            if target is not None:
+                remove_link(link)
+            make_link(link)
+        print(f"linked {link} -> {PLUGIN}")
         for line in warnings(config):
             print(f"warning: {line}")
-        print("Restart the Antigravity app and IDE to load it.")
+        print("Quit the Antigravity app and IDE completely and start them again.")
         return 0
 
-    if not target.exists() or len(entries) == len(data.get("entries", [])):
-        print("studio was not registered")
+    if target is None:
+        print("studio was not installed")
         return 0
-    data["entries"] = entries
-    if data == {"entries": []}:
-        target.unlink()
-        print(f"removed {target}")
-    else:
-        target.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        print(f"removed studio from {target}")
-    print("Restart the Antigravity app and IDE to unload it.")
+    if target != PLUGIN:
+        print(f"{link} points to another copy ({target}); left as it is.", file=sys.stderr)
+        return 1
+    remove_link(link)
+    print(f"removed {link}")
+    print("Quit the Antigravity app and IDE completely and start them again.")
     return 0
 
 
