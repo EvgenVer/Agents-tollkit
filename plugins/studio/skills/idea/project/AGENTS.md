@@ -85,7 +85,7 @@ on critical paths, outdated or vulnerable dependencies. Record the findings unde
 ## Long sessions
 
 `docs/TASKS.md` is your memory across sessions, context compaction and tools; Claude
-Code and Codex both read it. Keep `Now` current when you finish a task and before you
+Code, Codex and Antigravity all read it. Keep `Now` current when you finish a task and before you
 stop. When a stage is done, move its tasks to `docs/history/stage-<N>.md` and leave one
 summary line, so the file stays short.
 

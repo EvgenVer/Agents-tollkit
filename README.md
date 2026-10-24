@@ -1,11 +1,11 @@
 # Agents Toolkit
 
-`studio` is a plugin for Claude Code and Codex for building your own apps with an
-autonomous agent when you have some technical knowledge but are not a professional
-developer. The agent brainstorms the product with you, agrees the architecture, stack and
-key libraries with you, builds it stage by stage with tests, and keeps technical
-documentation with diagrams, so you understand not only what your product does but how
-it works inside.
+`studio` is a plugin for Claude Code, Codex and Antigravity for building your own apps
+with an autonomous agent when you have some technical knowledge but are not a
+professional developer. The agent brainstorms the product with you, agrees the
+architecture, stack and key libraries with you, builds it stage by stage with tests, and
+keeps technical documentation with diagrams, so you understand not only what your
+product does but how it works inside.
 
 Toolkit v1 is preserved under the git tag `v1-legacy`.
 
@@ -59,7 +59,22 @@ codex plugin add studio@agents-toolkit
 ```
 
 Codex runs plugin hooks only after you trust them: start Codex, run `/hooks` and trust
-the three `studio` hooks. Repeat after the hooks change.
+the three `studio` hooks. Repeat after every plugin update.
+
+Antigravity (the app and the IDE share one setup; they cannot install plugins from
+GitHub themselves, so the plugin is connected from a local copy):
+
+```bash
+git clone https://github.com/EvgenVer/Agents-tollkit "$HOME/.gemini/agents-toolkit"
+```
+
+```bash
+python "$HOME/.gemini/agents-toolkit/scripts/antigravity.py" install
+```
+
+Then restart the app and the IDE. The script registers the plugin in
+`~/.gemini/config/plugins.json`; `uninstall` instead of `install` removes it. To update,
+run `git -C "$HOME/.gemini/agents-toolkit" pull` and restart.
 
 Projects set up by the plugin also name this marketplace in `.claude/settings.json`, so
 Claude Code offers to install the plugin when you open such a project elsewhere.
@@ -68,15 +83,19 @@ Claude Code offers to install the plugin when you open such a project elsewhere.
 
 The agent works without asking for each step. What stops it is deterministic:
 
-| Layer | Claude Code | Codex |
-|---|---|---|
-| Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project. On Windows it works only after the sandbox setup below |
-| Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same |
-| Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects) | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked |
-| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md, empty project commands; before stopping: record evidence, update Now, check pages that mention changed files | the same |
+| Layer | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project. On Windows it works only after the sandbox setup below | not set up by studio; Antigravity's own permission settings apply |
+| Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same | the same |
+| Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects) | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked | denied with an explanation as in Codex, because Antigravity shows no prompt when a hook asks; the agent's own folders under `~/.gemini` stay readable and its plan artifacts writable |
+| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md, empty project commands; before stopping: record evidence, update Now, check pages that mention changed files | the same | the same; before stopping, the agent is sent back once per turn |
 
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
 cannot see. Commit often, and keep backups of important folders outside your projects.
+
+In Antigravity a hook that fails would block every tool, so the studio hooks let the
+action through when they fail, and they do nothing at all when `python` is missing from
+PATH. They were checked on Windows only.
 
 In Claude Code use the auto permission mode for long sessions. In Codex on Windows, turn
 on its sandbox once: accept the sandbox setup Codex offers, or set `[windows] sandbox =
@@ -86,7 +105,7 @@ outside it and asks you first; allow those commands permanently when it offers.
 
 ## Start a new project
 
-1. Create an empty folder and open it in Claude Code or Codex.
+1. Create an empty folder and open it in Claude Code, Codex or Antigravity.
 2. Write what you want to build, for example *"Use the idea skill. I want …"*. The agent
    sets up the project and brainstorms the idea with you.
 3. Approve `docs/PRODUCT.md`, go through the technical interview, approve
@@ -133,7 +152,13 @@ python -m unittest discover -s tests
 claude plugin validate .
 ```
 
-Raise `version` in both `plugins/studio/.claude-plugin/plugin.json` and
-`plugins/studio/.codex-plugin/plugin.json` with every change, so installed copies update
-after `claude plugin marketplace update agents-toolkit` and
-`codex plugin marketplace upgrade`.
+```bash
+agy plugin validate plugins/studio
+```
+
+Raise `version` in `plugins/studio/.claude-plugin/plugin.json`,
+`plugins/studio/.codex-plugin/plugin.json` and `plugins/studio/.antigravity-plugin/plugin.json`
+with every change, so installed copies update after
+`claude plugin marketplace update agents-toolkit` and `codex plugin marketplace upgrade`.
+Each tool reads its own hook file: Claude Code `hooks/hooks.json`, Codex
+`hooks/codex-hooks.json`, Antigravity `hooks.json` at the plugin root.
