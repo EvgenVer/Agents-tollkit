@@ -41,12 +41,15 @@ SANDBOX_NOTE = (
 
 
 def in_codex_sandbox():
-    """Codex runs sandboxed commands as a separate CodexSandbox user on Windows."""
+    """Codex runs sandboxed commands as a separate CodexSandbox user on Windows; the
+    environment still names the owner, so ask the system for the account instead."""
+    if os.environ.get("CODEX_SANDBOX"):
+        return True
     try:
-        user = getpass.getuser()
+        user = os.getlogin() if os.name == "nt" else getpass.getuser()
     except (KeyError, OSError):
         user = ""
-    return bool(os.environ.get("CODEX_SANDBOX")) or user.lower().startswith("codexsandbox")
+    return user.lower().startswith("codexsandbox")
 
 
 def git(root, *args):
