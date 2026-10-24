@@ -6,7 +6,7 @@
     {
       "name": "studio",
       "source": "./plugins/studio",
-      "description": "Idea interview, architecture and plan, plain-language explainers, and safety hooks."
+      "description": "Idea brainstorm, technical design with the owner, a technical docs site with diagrams, and safety hooks."
     }
   ]
 }

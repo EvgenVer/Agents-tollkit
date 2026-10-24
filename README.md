@@ -1,42 +1,47 @@
 # Agents Toolkit
 
-A small set of rules, skills and hooks for building your own apps with Claude Code and
-Codex when you are not a software developer. You describe what you want; the agent
-interviews you, designs and plans the product, builds it on its own, and explains what
-it built in plain language so you keep understanding your product.
+`studio` is a plugin for Claude Code and Codex for building your own apps with an
+autonomous agent when you have some technical knowledge but are not a professional
+developer. The agent brainstorms the product with you, agrees the architecture, stack and
+key libraries with you, builds it stage by stage with tests, and keeps technical
+documentation with diagrams, so you understand not only what your product does but how
+it works inside.
 
-Toolkit v1 (the large rule set with evals) is preserved under the git tag `v1-legacy`.
+Toolkit v1 is preserved under the git tag `v1-legacy`.
 
 ## What is inside
 
 | Part | Where | What it does |
 |---|---|---|
-| Project rules | [AGENTS.md template](plugins/studio/skills/idea/assets/AGENTS.md) | Short rules every project gets: who decides what, when to ask you, how to prove work, how to keep state |
-| `idea` skill | [plugins/studio/skills/idea](plugins/studio/skills/idea/SKILL.md) | Interviews you and writes `docs/PRODUCT.md` for your approval |
-| `plan` skill | [plugins/studio/skills/plan](plugins/studio/skills/plan/SKILL.md) | Designs the architecture and stages: `docs/ARCHITECTURE.md`, `docs/TASKS.md` |
-| `explain` skill | [plugins/studio/skills/explain](plugins/studio/skills/explain/SKILL.md) | Makes interactive HTML explainers with diagrams and keeps the product map |
-| Hooks | [plugins/studio/hooks](plugins/studio/hooks/studio_hooks.py) | Restore where work stopped, block secrets and destructive commands, record progress before stopping |
+| Project rules | [AGENTS.md template](plugins/studio/skills/idea/project/AGENTS.md) | Who decides what, how options are presented, tests and evidence, technical debt, local dependencies, safety |
+| `idea` skill | [skills/idea](plugins/studio/skills/idea/SKILL.md) | Sets up a new project with a script, then brainstorms the idea with you into `docs/PRODUCT.md` |
+| `design` skill | [skills/design](plugins/studio/skills/design/SKILL.md) | Technical interview: architecture, stack and libraries go to `docs/ARCHITECTURE.md` and `docs/decisions/`, stages to `docs/TASKS.md` |
+| `docs` skill | [skills/docs](plugins/studio/skills/docs/SKILL.md) | Technical documentation site: Markdown with Mermaid diagrams, code embedded from the source, hover hints for terms, dark theme |
+| Hooks | [hooks](plugins/studio/hooks/studio_hooks.py) | Restore where work stopped; block secrets and destructive commands; ask before pushing, global installs and files outside the project; check records and docs before stopping |
 
-Each project you build ends up with:
+Each project ends up with:
 
 ```text
-AGENTS.md              rules for the agents (CLAUDE.md just imports it)
-docs/PRODUCT.md        what the product does and for whom — you approve it
-docs/ARCHITECTURE.md   how it is built, and why: the decision log
-docs/TASKS.md          stages, tasks, evidence, and "Now": where work stopped
-docs/explain/          explanations for you; open index.html for the product map
+AGENTS.md, CLAUDE.md     rules for the agents (CLAUDE.md just imports AGENTS.md)
+.claude/settings.json    plugin and secret-file rules for Claude Code
+.codex/config.toml       sandbox settings for Codex
+zensical.toml            documentation site settings
+docs/                    PRODUCT, ARCHITECTURE, decisions/, components/, flows/, data,
+                         operations, glossary, TASKS (with Now: where work stopped),
+                         history/ (finished stages)
 ```
+
+Documents are written in the language you use with the agent; code and rules stay in
+English.
 
 ## Install once per tool
 
-The hooks need Python 3 available as `python` (on macOS and Linux Codex uses `python3`).
-Replace the path with your checkout of this repository, or use `EvgenVer/Agents-tollkit`
-once this version is on GitHub's default branch.
+You need Git and Python 3, available as `python` (Codex on macOS and Linux uses `python3`).
 
 Claude Code:
 
 ```bash
-claude plugin marketplace add "D:/my program/AGENTS_toolkit"
+claude plugin marketplace add EvgenVer/Agents-tollkit
 ```
 
 ```bash
@@ -46,72 +51,75 @@ claude plugin install studio@agents-toolkit
 Codex:
 
 ```bash
-codex plugin marketplace add "D:/my program/AGENTS_toolkit"
+codex plugin marketplace add EvgenVer/Agents-tollkit
 ```
 
 ```bash
 codex plugin add studio@agents-toolkit
 ```
 
-Codex does not run plugin hooks until you approve them: start Codex, run `/hooks`, and
-trust the three `studio` hooks. Repeat after the hooks change.
+Codex runs plugin hooks only after you trust them: start Codex, run `/hooks` and trust
+the three `studio` hooks. Repeat after the hooks change.
 
-For long autonomous sessions, let the agent edit and run commands inside the project
-without asking each time: in Claude Code use the auto permission mode; in Codex use the
-`workspace-write` sandbox with the `on-request` approval policy. The hooks and the rules
-still stop destructive and outward-facing actions.
+Projects set up by the plugin also name this marketplace in `.claude/settings.json`, so
+Claude Code offers to install the plugin when you open such a project elsewhere.
+
+## Autonomy and safety
+
+The agent works without asking for each step. What stops it is deterministic:
+
+| Layer | Claude Code | Codex |
+|---|---|---|
+| Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project |
+| Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same |
+| Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project | push, global installs and deleting outside the project are denied with an explanation, because Codex hooks cannot ask yet; the sandbox stops writes outside the project |
+| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md, empty project commands; before stopping: record evidence, update Now, check pages that mention changed files | the same |
+
+Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
+cannot see. Commit often, and keep backups of important folders outside your projects.
+
+In Claude Code use the auto permission mode for long sessions. In Codex on Windows, turn
+on its sandbox once: accept the sandbox setup Codex offers, or set `[windows] sandbox =
+"elevated"` in `~/.codex/config.toml` (the setup needs administrator approval).
 
 ## Start a new project
 
-1. Create an empty folder, initialise git in it (or ask the agent to), and open it in
-   Claude Code or Codex.
-2. Write: *"Use the idea skill. I want …"* and describe your idea in your own words.
-3. Answer the interview questions and approve `docs/PRODUCT.md`.
-4. The agent designs the product, shows you an explainer, and asks only about the real
-   choices. After you agree, it builds stage by stage, reports after each stage, and
-   asks you only at important forks.
-5. Later, write *"Continue"* in any session or tool; the agent reads `Now` and goes on.
-   Ask *"Explain how … works"* whenever something is unclear.
+1. Create an empty folder and open it in Claude Code or Codex.
+2. Write what you want to build, for example *"Use the idea skill. I want …"*. The agent
+   sets up the project and brainstorms the idea with you.
+3. Approve `docs/PRODUCT.md`, go through the technical interview, approve
+   `docs/ARCHITECTURE.md`.
+4. The agent builds stage by stage, reports after each stage and asks you only about
+   decisions that are yours. Write *"Continue"* in any session or tool to resume.
+5. Read the documentation site: the agent starts it at `http://localhost:8000`, or run
+   `.venv\Scripts\zensical serve` yourself (`.venv/bin/zensical serve` on macOS/Linux).
 
-## Move a v1 project to this version
+## Move an existing project to this version
 
-Install the plugin first, then paste this request into the project's agent session:
+Install the plugin, then paste this into the project's agent session:
 
-> Migrate this project from AGENTS toolkit v1 to the studio plugin. Work on a new git
-> branch, commit the result, do not push.
-> 1. Replace AGENTS.md and CLAUDE.md with the templates from the studio plugin's `idea`
->    skill assets. First carry any project-specific rules from the old files (anything
->    that is not generic toolkit text) into the new documents.
-> 2. Rebuild the documents with the studio templates: DESCRIPTION.md and
->    SPECIFICATION.md become docs/PRODUCT.md (approved, since I agreed them before);
->    PLAN.md technical decisions become docs/ARCHITECTURE.md with a decision log;
->    PLAN.md phases and TASKS.md become docs/TASKS.md, keeping finished tasks with their
->    evidence and the current position in Now. Show me any durable preferences from
->    MEMORY.md and where you put them.
-> 3. After their content is carried over, remove the old DESCRIPTION.md,
->    SPECIFICATION.md, PLAN.md, TASKS.md, MEMORY.md, AGENT_RUNS.md and specs/, and the
->    toolkit v1 files: .agents/docs, .agents/skills, .claude/skills,
->    .claude/commands/grill.md, .claude/commands/orchestrate.md,
->    .claude/agents/executor.md, .claude/agents/reviewer.md, .codex/agents/executor.toml,
->    .codex/agents/reviewer.toml and .agent-toolkit-manifest.tsv. Keep everything the
->    project added itself.
-> 4. Fill in Project commands in AGENTS.md from the code, then use the explain skill to
->    create the product map docs/explain/index.html.
-> 5. Show me what changed and what the next task is. Do not start new product work.
-
-## How the hooks behave
-
-- **Session start** (also after the context is compacted): gives the agent the `Now`
-  section of `docs/TASKS.md` and mentions uncommitted changes.
-- **Before each tool call**: blocks reading or printing secret files (`.env`, keys,
-  credentials), force-pushing, `git reset --hard`, `git clean -f`, discarding all
-  changes, and recursive deletes outside the project or of the whole project.
-- **Before the agent stops**: if changed files are newer than `docs/TASKS.md`, the agent
-  is asked once to record the evidence and commit, or to update `Now`.
-
-The hooks act only in projects with `docs/TASKS.md`, except the guard, which protects
-every project. They are a safety net, not a sandbox: an agent determined to read a
-secret could still find a way, so keep real secrets out of reach where you can.
+> Migrate this project to the studio plugin. Work on a new git branch, commit the
+> result, do not push.
+> 1. Run the setup script of the studio `idea` skill; it adds missing files and keeps
+>    existing ones. Then replace AGENTS.md and CLAUDE.md with the plugin's templates,
+>    first carrying project-specific rules from the old files into the new documents.
+> 2. Rebuild the documents with the studio templates. The product description and
+>    specification become docs/PRODUCT.md, approved, since I agreed them before.
+>    Technical decisions become docs/ARCHITECTURE.md and docs/decisions/, approved.
+>    Plans and tasks become docs/TASKS.md: keep finished tasks with their evidence,
+>    archive finished stages into docs/history/, and put the current position in Now.
+>    Show me durable preferences from old memory files and where you put them.
+> 3. Write the technical documentation from the actual code with the docs skill:
+>    components, main flows, data, operations, glossary.
+> 4. After their content is carried over, remove the old documents and toolkit files:
+>    DESCRIPTION.md, SPECIFICATION.md, PLAN.md, MEMORY.md, AGENT_RUNS.md, specs/,
+>    docs/explain/, .agents/docs, .agents/skills, .claude/skills,
+>    .claude/commands/grill.md, .claude/commands/orchestrate.md, .claude/agents/executor.md,
+>    .claude/agents/reviewer.md, .codex/agents/executor.toml, .codex/agents/reviewer.toml
+>    and .agent-toolkit-manifest.tsv, whichever exist. Keep everything the project added
+>    itself.
+> 5. Fill in Project commands from the code, check that the documentation site builds,
+>    and show me what changed and what the next task is. Do not start new product work.
 
 ## Maintain the toolkit
 
@@ -124,5 +132,6 @@ claude plugin validate .
 ```
 
 Raise `version` in both `plugins/studio/.claude-plugin/plugin.json` and
-`plugins/studio/.codex-plugin/plugin.json` with every change, so installed copies
-update after `claude plugin marketplace update` and `codex plugin marketplace upgrade`.
+`plugins/studio/.codex-plugin/plugin.json` with every change, so installed copies update
+after `claude plugin marketplace update agents-toolkit` and
+`codex plugin marketplace upgrade`.
