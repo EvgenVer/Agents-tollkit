@@ -70,9 +70,9 @@ The agent works without asking for each step. What stops it is deterministic:
 
 | Layer | Claude Code | Codex |
 |---|---|---|
-| Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project |
+| Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project. On Windows it works only after the sandbox setup below |
 | Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same |
-| Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project | push, global installs and deleting outside the project are denied with an explanation, because Codex hooks cannot ask yet; the sandbox stops writes outside the project |
+| Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects) | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked |
 | Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md, empty project commands; before stopping: record evidence, update Now, check pages that mention changed files | the same |
 
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks

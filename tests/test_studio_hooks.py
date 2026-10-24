@@ -152,6 +152,28 @@ class OutsideFiles(ProjectCase):
         claude_settings = Path.home() / ".claude" / "settings.json"
         self.assertEqual(self.decision("Write", file_path=str(claude_settings)), "ask")
 
+    def test_shell_and_patch_writes_outside_need_the_owner(self):
+        self.assertDecision("ask", "Bash", [
+            f"cp app.py {OUTSIDE}", f"mv app.py {OUTSIDE}", f"echo hi > {OUTSIDE}",
+            f"npm test >> {OUTSIDE}", f"cat app.py | tee {OUTSIDE}"])
+        self.assertDecision("ask", "PowerShell", [
+            f"Set-Content {OUTSIDE} -Value 1", f"Set-Content -Value 1 -Path {OUTSIDE}",
+            f"Get-Process | Out-File {OUTSIDE}", f"Copy-Item app.py -Destination {OUTSIDE}"])
+        patch = f"*** Begin Patch\n*** Add File: {OUTSIDE}\n+test\n*** End Patch"
+        self.assertEqual(self.decision("apply_patch", command=patch), "ask")
+
+    def test_shell_and_patch_writes_inside_are_allowed(self):
+        self.assertDecision(None, "Bash", [
+            "cp app.py backup.py", "mv app.py src/app.py", "npm test > out.log 2>&1",
+            "python app.py > /dev/null", "cat app.py | tee copy.py",
+            f"cp app.py {tempfile.gettempdir()}/copy.py"])
+        self.assertDecision(None, "PowerShell", [
+            "Set-Content notes.txt -Value 'a b'", "Get-Process | Out-File procs.txt",
+            "Copy-Item app.py -Destination .\\dist", "npm test > $null",
+            "New-Item -ItemType Directory -Path src"])
+        patch = "*** Begin Patch\n*** Add File: src/new.py\n+x = 1\n*** End Patch"
+        self.assertIsNone(self.decision("apply_patch", command=patch))
+
     def test_project_temp_and_agent_folders_are_allowed(self):
         notes = Path.home() / ".claude" / "projects" / "demo" / "memory" / "note.md"
         for tool, path in [("Read", self.root / "app.py"), ("Write", "src/new.py"),

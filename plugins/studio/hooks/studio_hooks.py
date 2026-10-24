@@ -49,6 +49,14 @@ AGENT_DIRS = [".claude", ".codex", ".agents"]
 AGENT_NOTE_DIRS = [os.path.join(".claude", "projects"), os.path.join(".claude", "plans")]
 SYSTEM_INSTALLERS = {"winget", "choco", "scoop", "brew", "apt", "apt-get", "dnf", "yum",
                      "pacman", "snap", "cargo", "go", "gem", "pipx"}
+# Shell commands that write files, and which argument names the destination.
+COPY_COMMANDS = {"cp", "copy", "copy-item", "cpi", "mv", "move", "move-item", "mi"}
+WRITE_COMMANDS = {"set-content", "sc", "add-content", "ac", "out-file", "new-item", "ni",
+                  "tee", "tee-object"}
+PATH_PARAMETERS = {"-path", "-literalpath", "-filepath", "-destination"}
+SWITCHES = POWERSHELL_FLAGS | {"-append", "-nonewline", "-noclobber", "-passthru"}
+NULL_TARGETS = {"/dev/null", "$null", "nul", "&1", "&2"}
+REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(\"[^\"]+\"|'[^']+'|[^\s;|&<>]+)")
 
 SETUP_ONLY = {".git", ".claude", ".codex", ".agents", ".vscode", ".idea"}
 
@@ -373,6 +381,34 @@ def deletion_risk(segment, cwd, root, payload):
     return None
 
 
+def write_targets(segment):
+    """Destinations a shell segment writes to: copies, moves, file writers, redirects."""
+    targets = [match.strip("'\"") for match in REDIRECT.findall(segment)]
+    words = command_words(segment)
+    name = Path(words[0]).stem.lower() if words else ""
+    if name in COPY_COMMANDS or name in WRITE_COMMANDS:
+        args, positional, named = words[1:], [], []
+        index = 0
+        while index < len(args):
+            word, lowered = args[index], args[index].lower()
+            index += 1
+            if lowered in PATH_PARAMETERS and index < len(args):
+                named.append(args[index])
+                index += 1
+            elif word.startswith("-"):
+                # A PowerShell parameter such as -Value or -Encoding takes the next word.
+                if name in WRITE_COMMANDS and name != "tee" and lowered not in SWITCHES:
+                    index += 1
+            else:
+                positional.append(word)
+        if named:
+            targets.append(named[-1])
+        elif positional:
+            targets += positional if name == "tee" else (
+                [positional[-1]] if name in COPY_COMMANDS else [positional[0]])
+    return [t for t in targets if t.lower() not in NULL_TARGETS and not t.startswith(("$", "%"))]
+
+
 def global_install(segment, venv_active):
     words = [w.lower() for w in command_words(strip_prose(segment))]
     if words and words[0] == "sudo":
@@ -417,6 +453,10 @@ def shell_decision(command, cwd, root, payload):
         risk = deletion_risk(segment, cwd, root, payload)
         if risk:
             return risk
+        for target in write_targets(segment):
+            reason = outside_project(resolve_path(target, cwd), root, payload, True)
+            if reason:
+                return ASK, reason
         if PUSH_PATTERN.search(prose_free):
             return ASK, PUSH_REASON
         if global_install(segment, venv_active):
@@ -459,8 +499,16 @@ def guard_decision(payload):
     if not isinstance(command, str):
         return None
     if tool == "apply_patch":
-        files = re.findall(r"^\*\*\* (?:Update|Delete) File: (.+)$", command, re.MULTILINE)
-        return (DENY, SECRET_REASON) if any(is_secret_path(f) for f in files) else None
+        files = re.findall(r"^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$",
+                           command, re.MULTILINE)
+        if any(kind in ("Update File", "Delete File") and is_secret_path(f) for kind, f in files):
+            return DENY, SECRET_REASON
+        root = guard_root(cwd)
+        for _, value in files:
+            reason = outside_project(resolve_path(value.strip(), cwd), root, payload, True)
+            if reason:
+                return ASK, reason
+        return None
     if tool not in SHELL_TOOLS:
         return None
     return shell_decision(command, cwd, guard_root(cwd), payload)
