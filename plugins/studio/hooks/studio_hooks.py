@@ -57,6 +57,7 @@ PATH_PARAMETERS = {"-path", "-literalpath", "-filepath", "-destination"}
 SWITCHES = POWERSHELL_FLAGS | {"-append", "-nonewline", "-noclobber", "-passthru"}
 NULL_TARGETS = {"/dev/null", "$null", "nul", "&1", "&2"}
 REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(\"[^\"]+\"|'[^']+'|[^\s;|&<>]+)")
+QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
 
 SETUP_ONLY = {".git", ".claude", ".codex", ".agents", ".vscode", ".idea"}
 
@@ -315,8 +316,10 @@ def command_words(segment):
 
 
 def strip_prose(segment):
-    """Drop quoted text with spaces: it is prose (a commit message, an echo), not a path."""
-    return re.sub(r"\"[^\"]*\s[^\"]*\"|'[^']*\s[^']*'", " ", segment)
+    """Drop quoted text with spaces: it is prose (a commit message, an echo), not a path.
+    Quotes pair from left to right, so "dir" "a prompt" keeps "dir" and drops the prompt."""
+    return QUOTED.sub(lambda match: " " if re.search(r"\s", match.group()) else match.group(),
+                      segment)
 
 
 def secret_in_command(command):

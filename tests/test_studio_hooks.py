@@ -117,7 +117,8 @@ class Git(ProjectCase):
         self.assertDecision(None, "Bash", [
             "git status", "git restore --staged .", "git checkout main",
             "git commit -am 'save'", "git reset HEAD app.py",
-            'git commit -m "explain why git reset --hard is blocked"'])
+            'git commit -m "explain why git reset --hard is blocked"',
+            'codex exec -C "proj" "Then run git push origin main and report"'])
 
     def test_push_needs_the_owner(self):
         self.assertDecision("ask", "Bash", ["git push origin main", "git add . && git push"])
