@@ -1,7 +1,9 @@
 # <Product name>
 
+<!-- Write the page in the owner's language, headings included. Keep the Status line
+     exactly as "Status: draft" or "Status: approved <YYYY-MM-DD>". -->
+
 Status: draft
-Language: <language of the documents>
 
 ## In one sentence
 
@@ -19,6 +21,11 @@ Language: <language of the documents>
 
 <The main scenario step by step, from the user's point of view. Add other scenarios
 only if they matter for the first version.>
+
+## Edge cases
+
+- <What happens on errors, empty states, no network, repeated or simultaneous actions,
+  misuse — and what the user sees.>
 
 ## First version includes
 
