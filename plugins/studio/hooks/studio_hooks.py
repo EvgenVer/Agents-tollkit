@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Hooks shared by Claude Code and Codex for projects that follow the studio AGENTS.md.
+"""Hooks shared by Claude Code, Codex and Antigravity for projects that follow the studio
+AGENTS.md.
 
-Usage: studio_hooks.py session-start | guard [--host codex] | stop   (hook JSON on stdin)
+Usage: studio_hooks.py session-start | guard | stop [--host codex|antigravity]
+       (hook JSON on stdin; the host defaults to Claude Code)
 
 session-start  Give the agent the `Now` section of docs/TASKS.md and reminders about the
                project state, so a new session, a compacted context or the other tool
                picks up where work stopped. In an empty folder, point to the idea skill.
 guard          Deny reading secrets and commands that destroy work. Ask the owner before
                pushing, installing software globally, or touching files outside the
-               project. Codex hooks cannot ask yet, so with --host codex those are denied.
+               project. Codex and Antigravity hooks cannot ask, so there those are denied.
 stop           Before the agent stops, make sure changed work is recorded in TASKS.md and
                that documentation pages about the changed files are still true.
 
@@ -94,8 +96,9 @@ INSTALL_REASON = (
     "Windows, .venv/bin/python -m pip install ... elsewhere), JavaScript without -g. "
     "If a global tool is really needed, the owner decides."
 )
-CODEX_ASK_PREFIX = ("Needs the owner's approval, and Codex hooks cannot ask for it: tell "
-                    "the owner and let them run it themselves. ")
+HOST_NAMES = {"codex": "Codex", "antigravity": "Antigravity"}
+ASK_PREFIX = ("Needs the owner's approval, and {} hooks cannot ask for it: tell the owner "
+              "and let them run it themselves. ")
 DESTRUCTIVE_PATTERNS = [
     (re.compile(r"\bgit\s+push\b.*(\s--force(-with-lease)?\b|\s-f\b|\s\+\S)"),
      "Force-pushing rewrites shared history. Ask the owner first."),
@@ -211,15 +214,12 @@ def is_new_folder(folder):
         return False
 
 
-def session_start(payload):
-    cwd = Path(payload.get("cwd") or os.getcwd()).resolve()
+def session_context(cwd):
+    """What a new session should know before it starts, or None."""
     root = project_root(cwd)
     tasks = root / TASKS
     if not tasks.is_file():
-        if is_new_folder(cwd):
-            emit({"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                         "additionalContext": NEW_FOLDER_CONTEXT}})
-        return
+        return NEW_FOLDER_CONTEXT if is_new_folder(cwd) else None
     text = read_text(tasks)
     now = section(text, "Now")
     parts = ["Where work stands, from docs/TASKS.md (section Now):",
@@ -235,8 +235,16 @@ def session_start(payload):
     if project_commands_missing(root):
         parts.append("The architecture is approved but Project commands in AGENTS.md is "
                      "empty. Filling it is part of task T1 \"Project skeleton\".")
-    emit({"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                 "additionalContext": "\n".join(parts)[:MAX_CONTEXT_CHARS]}})
+    return "\n".join(parts)[:MAX_CONTEXT_CHARS]
+
+
+def session_start(payload, host="claude"):
+    context = session_context(Path(payload.get("cwd") or os.getcwd()).resolve())
+    if host == "antigravity":
+        emit({"injectSteps": [{"systemMessage": {"systemMessage": context}}]} if context else {})
+    elif context:
+        emit({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                     "additionalContext": context}})
 
 
 # --- guard ---------------------------------------------------------------------------
@@ -280,24 +288,27 @@ def guard_root(cwd):
 
 
 def scratch_dirs(payload):
+    """Folders besides the project where the agent may write and delete files."""
     dirs = [Path(tempfile.gettempdir()).resolve()]
-    if payload.get("scratchpad_dir"):
-        dirs.append(Path(payload["scratchpad_dir"]).resolve())
+    for folder in [payload.get("scratchpad_dir"), *payload.get("workspace_dirs", [])]:
+        if folder:
+            dirs.append(Path(folder).resolve())
     return dirs
 
 
-def agent_dirs(writing):
+def agent_dirs(writing, payload):
     home = Path.home()
     dirs = [home / d for d in (AGENT_NOTE_DIRS if writing else AGENT_DIRS)]
     if not writing:
         dirs += [Path(os.environ[v]) for v in ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
                  if os.environ.get(v)]
+        dirs += [Path(d) for d in payload.get("readable_dirs", [])]
     return [d.resolve() for d in dirs]
 
 
 def outside_project(path, root, payload, writing):
     """The reason to ask when a file tool reaches outside the project, else None."""
-    allowed = [root, *scratch_dirs(payload), *agent_dirs(writing)]
+    allowed = [root, *scratch_dirs(payload), *agent_dirs(writing, payload)]
     if any(is_inside(path, folder) for folder in allowed):
         return None
     return WRITE_OUTSIDE_REASON if writing else READ_OUTSIDE_REASON
@@ -517,16 +528,25 @@ def guard_decision(payload):
     return shell_decision(command, cwd, guard_root(cwd), payload)
 
 
+def strongest(results):
+    """The deny among these (decision, reason) results, else the first ask, else None."""
+    found = [result for result in results if result]
+    return next((result for result in found if result[0] == DENY), found[0] if found else None)
+
+
 def guard(payload, host="claude"):
-    result = guard_decision(payload)
-    if not result:
-        return
-    decision, reason = result
-    if decision == ASK and host == "codex":
-        decision, reason = DENY, CODEX_ASK_PREFIX + reason
-    emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                 "permissionDecision": decision,
-                                 "permissionDecisionReason": reason}})
+    if host == "antigravity":
+        result = strongest(guard_decision(call) for call in antigravity_calls(payload))
+    else:
+        result = guard_decision(payload)
+    if result and result[0] == ASK and host in HOST_NAMES:
+        result = DENY, ASK_PREFIX.format(HOST_NAMES[host]) + result[1]
+    if host == "antigravity":
+        emit({"decision": result[0], "reason": result[1]} if result else {"decision": "allow"})
+    elif result:
+        emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                     "permissionDecision": result[0],
+                                     "permissionDecisionReason": result[1]}})
 
 
 # --- stop ----------------------------------------------------------------------------
@@ -556,13 +576,12 @@ def stale_pages(root, changed):
     return pages
 
 
-def stop(payload):
-    if payload.get("stop_hook_active"):
-        return
-    root = project_root(payload.get("cwd"))
+def stop_reason(cwd):
+    """Why the agent should not stop yet, or None."""
+    root = project_root(cwd)
     tasks = root / TASKS
     if not tasks.is_file():
-        return
+        return None
     changed = [p for p in changed_files(root) if p.resolve() != tasks.resolve()]
     reasons = []
     times = [p.stat().st_mtime for p in changed if p.exists()]
@@ -578,22 +597,122 @@ def stop(payload):
             "These documentation pages mention files you changed after the page was last "
             f"edited: {'; '.join(pages[:5])}. Check that they still describe the code, and "
             "update them if they do not.")
-    if reasons:
-        emit({"decision": "block", "reason": "Before you stop: " + " ".join(reasons)})
+    return "Before you stop: " + " ".join(reasons) if reasons else None
+
+
+def stop(payload, host="claude"):
+    if host == "antigravity":
+        antigravity_stop(payload)
+        return
+    if payload.get("stop_hook_active"):
+        return
+    reason = stop_reason(payload.get("cwd"))
+    if reason:
+        emit({"decision": "block", "reason": reason})
+
+
+# --- Antigravity ---------------------------------------------------------------------
+# Antigravity sends camelCase payloads, and its tool names differ between the app
+# (read_file, write_file, edit_file) and the IDE (view_file, list_dir, grep_search,
+# write_to_file, replace_file_content, ...). Each call is translated into the Claude Code
+# calls that guard_decision checks; tools without paths or commands pass.
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+# Antigravity's own folders: settings, plugins, skills and conversation artifacts.
+GEMINI_DIRS = [os.path.join(".gemini", d)
+               for d in ("config", "antigravity", "antigravity-ide", "antigravity-cli")]
+FILE_ARGS = ("AbsolutePath", "Path", "TargetFile", "FilePath", "File")
+FOLDER_ARGS = ("DirectoryPath", "SearchPath", "SearchDirectory", "Directory",
+               "TargetDirectories")
+PATTERN_ARGS = ("Pattern", "Includes")
+NEW_FILE_TOOLS = {"write_file", "write_to_file", "create_file"}
+WRITING_TOOL = re.compile(r"write|edit|replace|create|delete|move|patch", re.IGNORECASE)
+STOP_STATE = Path(tempfile.gettempdir()) / "studio-hooks" / "antigravity-stop.json"
+# What Antigravity reads as "carry on" when a hook fails: {} would deny a tool call.
+NEUTRAL = {"session-start": {}, "guard": {"decision": "allow"}, "stop": {"decision": "stop"}}
+
+
+def strings(value):
+    """A string argument, or the strings in a list argument."""
+    items = value if isinstance(value, list) else [value]
+    return [item for item in items if isinstance(item, str) and item.strip()]
+
+
+def antigravity_cwd(payload):
+    workspaces = strings(payload.get("workspacePaths"))
+    return workspaces[0] if workspaces else payload.get("artifactDirectoryPath")
+
+
+def antigravity_calls(payload):
+    """The Claude Code tool calls that do what this Antigravity tool call does."""
+    call = payload.get("toolCall") or {}
+    name, args = str(call.get("name", "")), call.get("args") or {}
+    context = {"cwd": args.get("Cwd") or antigravity_cwd(payload),
+               "scratchpad_dir": payload.get("artifactDirectoryPath"),
+               "workspace_dirs": strings(payload.get("workspacePaths")),
+               "readable_dirs": [PLUGIN_ROOT, *(Path.home() / d for d in GEMINI_DIRS)]}
+
+    def claude(tool, **tool_input):
+        return {**context, "tool_name": tool, "tool_input": tool_input}
+
+    if name == "run_command":
+        return [claude("PowerShell", command=str(args.get("CommandLine", "")))]
+    calls = [claude("apply_patch", command=value) for value in args.values()
+             if isinstance(value, str) and "*** Begin Patch" in value]
+    writing = bool(WRITING_TOOL.search(name))
+    file_tool = ("Write" if name in NEW_FILE_TOOLS else "Edit") if writing else "Read"
+    folders = [folder for key in FOLDER_ARGS for folder in strings(args.get(key))]
+    for key in FILE_ARGS:
+        calls += [claude(file_tool, file_path=path) for path in strings(args.get(key))]
+    if writing:
+        calls += [claude("Edit", file_path=folder) for folder in folders]
+    else:
+        calls += [claude("Grep", path=folder) for folder in folders]
+        calls += [claude("Glob", pattern=pattern)
+                  for key in PATTERN_ARGS for pattern in strings(args.get(key))]
+    return calls
+
+
+def antigravity_stop(payload):
+    """Antigravity has no stop_hook_active: remember the run that was sent back to work,
+    and let the run right after it stop."""
+    conversation = str(payload.get("conversationId", ""))
+    run = int(payload.get("executionNum") or 0)
+    try:
+        sent_back = json.loads(STOP_STATE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        sent_back = {}
+    reason = None
+    if (payload.get("terminationReason", "NO_TOOL_CALL") == "NO_TOOL_CALL"
+            and sent_back.get(conversation) != run - 1):
+        reason = stop_reason(payload.get("cwd"))
+    if not reason:
+        emit({"decision": "stop"})
+        return
+    sent_back = dict(list(sent_back.items())[-50:])
+    sent_back[conversation] = run
+    STOP_STATE.parent.mkdir(parents=True, exist_ok=True)
+    STOP_STATE.write_text(json.dumps(sent_back), encoding="utf-8")
+    emit({"decision": "continue", "reason": reason})
 
 
 def main(argv):
     command = argv[1] if len(argv) > 1 else ""
     host = argv[3] if len(argv) > 3 and argv[2] == "--host" else "claude"
-    handlers = {"session-start": session_start, "guard": lambda p: guard(p, host), "stop": stop}
+    handlers = {"session-start": session_start, "guard": guard, "stop": stop}
     handler = handlers.get(command)
     if handler is None:
         print(__doc__, file=sys.stderr)
         return 0
     try:
-        handler(read_payload())
+        payload = read_payload()
+        if host == "antigravity":
+            payload = {**payload, "cwd": antigravity_cwd(payload)}
+        handler(payload, host)
     except Exception as error:  # a broken hook must never stop the agent
         print(f"studio hook error: {error}", file=sys.stderr)
+        if host == "antigravity":
+            emit(NEUTRAL[command])
     return 0
 
 

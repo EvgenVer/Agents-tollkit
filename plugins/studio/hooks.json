@@ -1,0 +1,30 @@
+{
+  "studio": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python hooks/studio_hooks.py session-start --host antigravity || exit 0",
+        "timeout": 15
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/studio_hooks.py guard --host antigravity || exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python hooks/studio_hooks.py stop --host antigravity || exit 0",
+        "timeout": 15
+      }
+    ]
+  }
+}

@@ -8,9 +8,14 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "plugins" / "studio" / "hooks" / "studio_hooks.py"
+PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "studio"
+SCRIPT = PLUGIN / "hooks" / "studio_hooks.py"
+# Real Antigravity app and IDE payloads, recorded by a probe hook and anonymised.
+FIXTURES = json.loads((Path(__file__).resolve().parent / "fixtures" / "antigravity.json")
+                      .read_text(encoding="utf-8"))
 spec = importlib.util.spec_from_file_location("studio_hooks", SCRIPT)
 hooks = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hooks)
@@ -312,6 +317,190 @@ class Robustness(unittest.TestCase):
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "")
+
+    def test_bad_input_never_blocks_antigravity(self):
+        # Antigravity reads {} as a denial, so a failed guard must answer allow.
+        result = subprocess.run([sys.executable, str(SCRIPT), "guard", "--host", "antigravity"],
+                                input="not json", capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), {"decision": "allow"})
+
+
+class Antigravity(ProjectCase):
+    def setUp(self):
+        super().setUp()
+        self.artifacts = Path(self.tmp.name).resolve() / "brain" / "conversation"
+        self.artifacts.mkdir(parents=True)
+        self.conversation = str(uuid.uuid4())
+
+    def payload(self, surface, event, **args):
+        """A recorded payload moved to this project; args replace recorded tool arguments."""
+        def fill(value):
+            if isinstance(value, dict):
+                return {key: fill(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [fill(item) for item in value]
+            if isinstance(value, str):
+                return (value.replace("{workspace}", str(self.root))
+                        .replace("{artifacts}", self.artifacts.as_posix()))
+            return value
+        payload = fill(FIXTURES[surface][event])
+        workspace = self.root.as_posix()
+        payload["workspacePaths"] = [workspace[:1].lower() + workspace[1:]]  # as recorded
+        payload["conversationId"] = self.conversation
+        if args:
+            payload["toolCall"]["args"].update({k: str(v) for k, v in args.items()})
+        return payload
+
+    def verdict(self, surface, tool, **args):
+        calls = hooks.antigravity_calls(self.payload(surface, tool, **args))
+        result = hooks.strongest(hooks.guard_decision(call) for call in calls)
+        return result[0] if result else None
+
+    def call(self, name, **args):
+        """An IDE tool the probe did not record, with the argument names it uses."""
+        payload = self.payload("ide", "view_file")
+        payload["toolCall"] = {"name": name, "args": args}
+        result = hooks.strongest(hooks.guard_decision(call)
+                                 for call in hooks.antigravity_calls(payload))
+        return result[0] if result else None
+
+    def test_recorded_calls_inside_the_project_pass(self):
+        for surface, events in FIXTURES.items():
+            for tool in events:
+                if tool not in ("SessionStart", "Stop"):
+                    self.assertIsNone(self.verdict(surface, tool), (surface, tool))
+
+    def test_files_outside_the_project_need_the_owner(self):
+        for tool in ["read_file", "write_file", "edit_file"]:
+            self.assertEqual(self.verdict("app", tool, Path=OUTSIDE), "ask", tool)
+        self.assertEqual(self.verdict("ide", "view_file", AbsolutePath=OUTSIDE), "ask")
+        self.assertEqual(self.verdict("ide", "list_dir", DirectoryPath=OUTSIDE.parent), "ask")
+        self.assertEqual(self.verdict("ide", "grep_search", SearchPath=OUTSIDE.parent), "ask")
+        for tool in ["write_to_file", "replace_file_content"]:
+            self.assertEqual(self.verdict("ide", tool, TargetFile=OUTSIDE), "ask", tool)
+
+    def test_secrets_are_denied(self):
+        secret = self.root / ".env"
+        self.assertIsNone(self.verdict("app", "write_file", Path=secret))  # a new file
+        self.assertIsNone(self.verdict("ide", "write_to_file", TargetFile=secret))
+        secret.write_text("TOKEN=x\n", encoding="utf-8")
+        self.assertEqual(self.verdict("app", "read_file", Path=secret), "deny")
+        self.assertEqual(self.verdict("app", "edit_file", Path=secret), "deny")
+        self.assertEqual(self.verdict("ide", "view_file", AbsolutePath=secret), "deny")
+        self.assertEqual(self.verdict("ide", "grep_search", SearchPath=secret), "deny")
+        self.assertEqual(self.verdict("ide", "write_to_file", TargetFile=secret), "deny")
+        self.assertEqual(self.verdict("app", "run_command", CommandLine="Get-Content .env"),
+                         "deny")
+
+    def test_commands(self):
+        self.assertEqual(self.verdict("app", "run_command", CommandLine="git push"), "ask")
+        self.assertEqual(self.verdict("ide", "run_command", CommandLine="npm i -g pnpm"), "ask")
+        self.assertEqual(self.verdict("ide", "run_command", CommandLine="git reset --hard"),
+                         "deny")
+        self.assertEqual(self.verdict("ide", "run_command", Cwd=self.root / "docs",
+                                      CommandLine="Remove-Item -Recurse -Force .."), "deny")
+        self.assertEqual(self.verdict("app", "run_command",
+                                      CommandLine=f"Set-Content {OUTSIDE} -Value 1"), "ask")
+        self.assertIsNone(self.verdict("app", "run_command", CommandLine="git status"))
+
+    def test_unrecorded_tools(self):
+        (self.root / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+        self.assertEqual(self.call("find_by_name", SearchDirectory=str(self.root),
+                                   Pattern=".env"), "deny")
+        self.assertEqual(self.call("multi_replace_file_content", TargetFile=str(OUTSIDE)),
+                         "ask")
+        self.assertEqual(self.call("codebase_search", Query="x",
+                                   TargetDirectories=[str(OUTSIDE.parent)]), "ask")
+        self.assertIsNone(self.call("view_file_outline", AbsolutePath=str(self.root / "app.py")))
+        self.assertIsNone(self.call("browser_click_element", Index=3))
+        self.assertIsNone(self.call("notify_user"))
+
+    def test_agent_folders(self):
+        plan = self.artifacts / "implementation_plan.md"
+        self.assertIsNone(self.verdict("ide", "write_to_file", TargetFile=plan))
+        skill = PLUGIN / "skills" / "idea" / "SKILL.md"
+        self.assertIsNone(self.verdict("ide", "view_file", AbsolutePath=skill))
+        builtin = Path.home() / ".gemini" / "antigravity" / "builtin" / "skills" / "x" / "SKILL.md"
+        self.assertIsNone(self.verdict("app", "read_file", Path=builtin))
+        settings = Path.home() / ".gemini" / "config" / "config.json"
+        self.assertEqual(self.verdict("app", "write_file", Path=settings), "ask")
+
+    def test_guard_output(self):
+        def guard(**args):
+            return run_hook("guard", self.payload("app", "run_command", **args),
+                            "--host", "antigravity")
+        self.assertEqual(guard(CommandLine="git status"), {"decision": "allow"})
+        asked = guard(CommandLine="git push")
+        self.assertEqual(asked["decision"], "deny")  # Antigravity shows no prompt for ask
+        self.assertIn("Antigravity hooks cannot ask", asked["reason"])
+        self.assertIn("Pushing publishes", asked["reason"])
+        self.assertEqual(guard(CommandLine="git clean -fd")["decision"], "deny")
+
+    def test_session_start(self):
+        def context():
+            output = run_hook("session-start", self.payload("ide", "SessionStart"),
+                              "--host", "antigravity")
+            steps = output.get("injectSteps", [])
+            return steps[0]["systemMessage"]["systemMessage"] if steps else None
+        self.assertIn("Next step: add the save button", context())
+        os.remove(self.root / "docs" / "TASKS.md")
+        self.assertIsNone(context())
+
+    def test_stop_sends_back_once_per_run(self):
+        def stop(run, reason="NO_TOOL_CALL"):
+            payload = self.payload("app", "Stop")
+            payload.update(executionNum=run, terminationReason=reason)
+            return run_hook("stop", payload, "--host", "antigravity")["decision"]
+        self.assertEqual(stop(0), "stop")
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+        set_mtime(self.root / "app.py", 5)
+        self.assertEqual(stop(0), "continue")
+        self.assertEqual(stop(1), "stop")  # the run that was sent back may stop
+        self.assertEqual(stop(2), "continue")  # the next turn is checked again
+        self.assertEqual(stop(4, "USER_CANCELED"), "stop")
+
+
+class Packaging(unittest.TestCase):
+    def read(self, relative):
+        return json.loads((PLUGIN / relative).read_text(encoding="utf-8"))
+
+    def test_versions_match(self):
+        versions = {self.read(manifest)["version"] for manifest in
+                    [".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
+                     ".antigravity-plugin/plugin.json"]}
+        self.assertEqual(len(versions), 1, versions)
+
+    def test_each_tool_keeps_its_own_hooks(self):
+        self.assertEqual(self.read(".codex-plugin/plugin.json")["hooks"],
+                         "./hooks/codex-hooks.json")
+        for relative in ["hooks/hooks.json", "hooks/codex-hooks.json"]:
+            self.assertNotIn("antigravity", (PLUGIN / relative).read_text(encoding="utf-8"))
+        hooks_spec = self.read("hooks.json")["studio"]
+        commands = [hooks_spec["SessionStart"][0]["command"],
+                    hooks_spec["PreToolUse"][0]["hooks"][0]["command"],
+                    hooks_spec["Stop"][0]["command"]]
+        for command, name in zip(commands, ["session-start", "guard", "stop"]):
+            self.assertEqual(command, f"python hooks/studio_hooks.py {name} "
+                                      "--host antigravity || exit 0")
+
+    def run_like_antigravity(self, command, payload):
+        """Antigravity runs a hook through cmd /c (sh -c elsewhere) in the plugin folder."""
+        command = command.replace("python ", f'"{sys.executable}" ', 1)
+        shell = f'cmd /s /c "{command}"' if os.name == "nt" else ["sh", "-c", command]
+        return subprocess.run(shell, cwd=PLUGIN, input=json.dumps(payload),
+                              capture_output=True, text=True, timeout=30)
+
+    def test_antigravity_command_line(self):
+        command = self.read("hooks.json")["studio"]["PreToolUse"][0]["hooks"][0]["command"]
+        payload = {"toolCall": {"name": "run_command", "args": {"CommandLine": "git status"}},
+                   "workspacePaths": [str(PLUGIN)]}
+        result = self.run_like_antigravity(command, payload)
+        self.assertEqual(json.loads(result.stdout), {"decision": "allow"})
+        # Without a working Python the hook says nothing, which Antigravity reads as allow.
+        broken = self.run_like_antigravity(command.replace("studio_hooks.py", "missing.py"),
+                                           payload)
+        self.assertEqual((broken.returncode, broken.stdout.strip()), (0, ""))
 
 
 if __name__ == "__main__":

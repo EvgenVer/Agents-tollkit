@@ -1,7 +1,7 @@
 {
   "name": "studio",
   "displayName": "Studio",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Build your own apps with an autonomous agent: brainstorm the idea, agree the architecture and stack, keep technical docs with diagrams, and safety hooks.",
   "author": { "name": "EvgenVer" },
   "repository": "https://github.com/EvgenVer/Agents-tollkit",

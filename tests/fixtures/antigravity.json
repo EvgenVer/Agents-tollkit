@@ -1,0 +1,231 @@
+{
+  "app": {
+    "SessionStart": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-medium",
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "read_file": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-medium",
+      "stepIdx": 3,
+      "toolCall": {
+        "args": {
+          "Path": "{workspace}\\notes.txt"
+        },
+        "name": "read_file"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "run_command": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-medium",
+      "stepIdx": 5,
+      "toolCall": {
+        "args": {
+          "CommandLine": "Get-ChildItem",
+          "WaitMsBeforeAsync": 5000,
+          "toolSummary": "List files in workspace"
+        },
+        "name": "run_command"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "write_file": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-medium",
+      "stepIdx": 11,
+      "toolCall": {
+        "args": {
+          "Content": "hello",
+          "Path": "{workspace}\\hello.txt"
+        },
+        "name": "write_file"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "edit_file": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-medium",
+      "stepIdx": 13,
+      "toolCall": {
+        "args": {
+          "Path": "{workspace}\\hello.txt",
+          "Replacement": "hello world",
+          "Target": "hello"
+        },
+        "name": "edit_file"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "Stop": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "error": "",
+      "executionNum": 0,
+      "fullyIdle": true,
+      "modelName": "gemini-3.8-flash-medium",
+      "terminationReason": "NO_TOOL_CALL",
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    }
+  },
+  "ide": {
+    "SessionStart": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-high",
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "view_file": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-high",
+      "stepIdx": 5,
+      "toolCall": {
+        "args": {
+          "AbsolutePath": "{workspace}\\notes.txt"
+        },
+        "name": "view_file"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "list_dir": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-high",
+      "stepIdx": 8,
+      "toolCall": {
+        "args": {
+          "DirectoryPath": "{workspace}"
+        },
+        "name": "list_dir"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "grep_search": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-high",
+      "stepIdx": 10,
+      "toolCall": {
+        "args": {
+          "CaseInsensitive": false,
+          "MatchPerLine": true,
+          "Query": "fox",
+          "SearchPath": "{workspace}"
+        },
+        "name": "grep_search"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "run_command": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-high",
+      "stepIdx": 12,
+      "toolCall": {
+        "args": {
+          "CommandLine": "Get-ChildItem *.txt -Name",
+          "Cwd": "{workspace}",
+          "IsDaemon": false,
+          "WaitMsBeforeAsync": 5000
+        },
+        "name": "run_command"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "write_to_file": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-high",
+      "stepIdx": 14,
+      "toolCall": {
+        "args": {
+          "CodeContent": "hello",
+          "Description": "Create hello.txt with content 'hello'",
+          "Overwrite": true,
+          "TargetFile": "{workspace}\\hello.txt"
+        },
+        "name": "write_to_file"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "replace_file_content": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "modelName": "gemini-3.8-flash-high",
+      "stepIdx": 16,
+      "toolCall": {
+        "args": {
+          "AllowMultiple": false,
+          "Description": "Update 'hello' to 'hello world'",
+          "EndLine": 1,
+          "Instruction": "Change 'hello' to 'hello world' in hello.txt",
+          "ReplacementContent": "hello world",
+          "StartLine": 1,
+          "TargetContent": "hello",
+          "TargetFile": "{workspace}\\hello.txt"
+        },
+        "name": "replace_file_content"
+      },
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    },
+    "Stop": {
+      "artifactDirectoryPath": "{artifacts}",
+      "conversationId": "00000000-0000-0000-0000-000000000000",
+      "error": "",
+      "executionNum": 0,
+      "fullyIdle": true,
+      "modelName": "gemini-3.8-flash-high",
+      "terminationReason": "NO_TOOL_CALL",
+      "transcriptPath": "{artifacts}/.system_generated/logs/transcript_full.jsonl",
+      "workspacePaths": [
+        "{workspace}"
+      ]
+    }
+  }
+}
