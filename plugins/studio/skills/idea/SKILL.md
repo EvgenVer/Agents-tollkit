@@ -1,6 +1,6 @@
 ---
 name: idea
-description: Set up a new project and brainstorm the owner's product idea with them until it is clear, then record it in an approved docs/PRODUCT.md. Use when starting a new product, when docs/PRODUCT.md is missing or still a draft, or when the owner wants to change what the product does.
+description: Set up a new project and brainstorm the owner's product idea with them until it is clear, then record it in an approved docs/PRODUCT.md. Use whenever the owner describes an app, bot, site or tool they want to build and the project has no approved docs/PRODUCT.md (always in an empty folder or one without AGENTS.md), and when the owner wants to change what the product does.
 ---
 
 # Shape the idea

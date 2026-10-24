@@ -5,7 +5,7 @@ Usage: studio_hooks.py session-start | guard [--host codex] | stop   (hook JSON 
 
 session-start  Give the agent the `Now` section of docs/TASKS.md and reminders about the
                project state, so a new session, a compacted context or the other tool
-               picks up where work stopped.
+               picks up where work stopped. In an empty folder, point to the idea skill.
 guard          Deny reading secrets and commands that destroy work. Ask the owner before
                pushing, installing software globally, or touching files outside the
                project. Codex hooks cannot ask yet, so with --host codex those are denied.
@@ -50,7 +50,15 @@ AGENT_NOTE_DIRS = [os.path.join(".claude", "projects"), os.path.join(".claude", 
 SYSTEM_INSTALLERS = {"winget", "choco", "scoop", "brew", "apt", "apt-get", "dnf", "yum",
                      "pacman", "snap", "cargo", "go", "gem", "pipx"}
 
+SETUP_ONLY = {".git", ".claude", ".codex", ".agents", ".vscode", ".idea"}
+
 DENY, ASK = "deny", "ask"
+
+NEW_FOLDER_CONTEXT = (
+    "This folder holds no project yet. When the owner describes something they want to "
+    "build, use the studio `idea` skill first: it sets up the project and brainstorms the "
+    "idea with the owner before any technical choices."
+)
 
 SECRET_REASON = (
     "This file may contain secrets, and AGENTS.md forbids reading or printing them. "
@@ -186,10 +194,22 @@ def project_commands_missing(root):
     return not commands.strip()
 
 
+def is_new_folder(folder):
+    """True for a folder with nothing in it but version control and agent settings."""
+    try:
+        return all(entry.name in SETUP_ONLY for entry in folder.iterdir())
+    except OSError:
+        return False
+
+
 def session_start(payload):
-    root = project_root(payload.get("cwd"))
+    cwd = Path(payload.get("cwd") or os.getcwd()).resolve()
+    root = project_root(cwd)
     tasks = root / TASKS
     if not tasks.is_file():
+        if is_new_folder(cwd):
+            emit({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                         "additionalContext": NEW_FOLDER_CONTEXT}})
         return
     text = read_text(tasks)
     now = section(text, "Now")

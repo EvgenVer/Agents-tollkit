@@ -235,6 +235,14 @@ class SessionStart(ProjectCase):
         os.remove(self.root / "docs" / "TASKS.md")
         self.assertIsNone(run_hook("session-start", {"cwd": str(self.root)}))
 
+    def test_points_an_empty_folder_to_the_idea_skill(self):
+        folder = Path(self.tmp.name).resolve() / "new-app"
+        (folder / ".git").mkdir(parents=True)
+        output = run_hook("session-start", {"cwd": str(folder), "source": "startup"})
+        self.assertIn("`idea` skill", output["hookSpecificOutput"]["additionalContext"])
+        (folder / "main.py").write_text("", encoding="utf-8")
+        self.assertIsNone(run_hook("session-start", {"cwd": str(folder)}))
+
 
 class Stop(ProjectCase):
     def stop(self, **extra):
