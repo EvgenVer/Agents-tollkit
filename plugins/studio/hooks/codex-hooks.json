@@ -18,8 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$PLUGIN_ROOT/hooks/studio_hooks.py\" guard",
-            "commandWindows": "python -c \"import os,runpy,sys; sys.argv=['studio_hooks','guard']; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'hooks','studio_hooks.py'), run_name='__main__')\"",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/studio_hooks.py\" guard --host codex",
+            "commandWindows": "python -c \"import os,runpy,sys; sys.argv=['studio_hooks','guard','--host','codex']; runpy.run_path(os.path.join(os.environ['PLUGIN_ROOT'],'hooks','studio_hooks.py'), run_name='__main__')\"",
             "timeout": 10
           }
         ]
