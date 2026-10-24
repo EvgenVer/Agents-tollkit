@@ -17,7 +17,9 @@ If the project has no `AGENTS.md`, run this skill's setup script with Python:
 Use the language code of the conversation (`ru`, `en`, …). The script creates
 `AGENTS.md`, `CLAUDE.md`, `.gitignore`, agent settings for Claude Code and Codex, the
 documentation site skeleton and a git repository, and commits them. It never overwrites a
-file. Tell the owner in a few lines what it created; then read the new `AGENTS.md`.
+file. Inside the Codex sandbox it skips git and says so: then run the git commands it
+names with escalated permissions. Tell the owner in a few lines what it created; then
+read the new `AGENTS.md`.
 
 ## Brainstorm
 
@@ -43,6 +45,10 @@ file. Tell the owner in a few lines what it created; then read the new `AGENTS.m
    states (an existing server, a required language) under Constraints.
 5. Stop when you could write acceptance examples the owner would agree with. State
    sensible defaults ("a single user for now") instead of asking about every detail.
+
+While the brainstorm is open, keep its state in `docs/TASKS.md` with only the `## Now`
+section (Stage: idea; what is settled; Waiting for the owner), so any session can resume
+it. The `design` skill later fills in the rest of the file.
 
 ## Write and approve
 

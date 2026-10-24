@@ -6,10 +6,13 @@ Usage: setup_project.py [--root DIR] [--language CODE] [--name NAME]
 Creates AGENTS.md, CLAUDE.md, .gitignore, .claude/settings.json, .codex/config.toml and
 the documentation site skeleton (zensical.toml, requirements-docs.txt, docs/), creates a
 git repository if there is none, and commits the files it created. An existing
-.gitignore only gets the missing lines appended. Prints one line per file.
+.gitignore only gets the missing lines appended. Prints one line per file. Inside the
+Codex sandbox it leaves git to the agent, which must run it outside the sandbox.
 """
 
 import argparse
+import getpass
+import os
 import re
 import subprocess
 import sys
@@ -30,6 +33,20 @@ FILES = {
     "docs/.terms.md": "docs/.terms.md",
 }
 COMMIT_MESSAGE = "chore: set up project for the studio workflow"
+SANDBOX_NOTE = (
+    "skipped  git: inside the Codex sandbox a new repository would belong to the sandbox "
+    "user and git cannot write to it. Run `git init` (if needed), `git add -A` and "
+    "`git commit` outside the sandbox, with escalated permissions."
+)
+
+
+def in_codex_sandbox():
+    """Codex runs sandboxed commands as a separate CodexSandbox user on Windows."""
+    try:
+        user = getpass.getuser()
+    except (KeyError, OSError):
+        user = ""
+    return bool(os.environ.get("CODEX_SANDBOX")) or user.lower().startswith("codexsandbox")
 
 
 def git(root, *args):
@@ -83,6 +100,9 @@ def main(argv=None):
         print(f"created  {target}")
         touched.append(target)
 
+    if in_codex_sandbox():
+        print(SANDBOX_NOTE)
+        return 0
     if git(root, "rev-parse", "--is-inside-work-tree").returncode != 0:
         git(root, "init", "-q")
         print("created  git repository")

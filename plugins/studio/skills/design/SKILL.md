@@ -60,7 +60,8 @@ product allows.
 
 1. Split the work into stages. Each stage ends with something the owner can see or try;
    stage 1 is the thinnest version that works end to end.
-2. Write `docs/TASKS.md` from [assets/TASKS.md](assets/TASKS.md). Stage 1 starts with
+2. Write `docs/TASKS.md` from [assets/TASKS.md](assets/TASKS.md), replacing the
+   brainstorm's `Now`. Stage 1 starts with
    T1 "Project skeleton": the environment, linting and formatting, the test runner, a
    git pre-commit hook that runs them, the documentation site, and the `Project
    commands` section in `AGENTS.md`. Break only stage 1 into tasks, each one verifiable

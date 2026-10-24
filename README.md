@@ -80,7 +80,9 @@ cannot see. Commit often, and keep backups of important folders outside your pro
 
 In Claude Code use the auto permission mode for long sessions. In Codex on Windows, turn
 on its sandbox once: accept the sandbox setup Codex offers, or set `[windows] sandbox =
-"elevated"` in `~/.codex/config.toml` (the setup needs administrator approval).
+"elevated"` in `~/.codex/config.toml` (the setup needs administrator approval). Inside
+the sandbox `.git` is read-only, so Codex runs `git init`, `git add` and `git commit`
+outside it and asks you first; allow those commands permanently when it offers.
 
 ## Start a new project
 
