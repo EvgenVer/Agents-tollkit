@@ -120,30 +120,68 @@ outside it and asks you first; allow those commands permanently when it offers.
 
 ## Move an existing project to this version
 
-Install the plugin, then paste this into the project's agent session:
+Install the plugin, open the project in Claude Code, Codex or Antigravity and paste the
+text below. The agent moves the project on a separate branch, `studio-migration`, checks
+the result against the branch you were on and merges it into that branch only when every
+check passes. If a check fails, it stops and tells you, and your branch stays as it was.
+Nothing is pushed, and the previous version stays in the git history. Codex asks before
+each git command it runs outside its sandbox; allow them.
 
-> Migrate this project to the studio plugin. Work on a new git branch, commit the
-> result, do not push.
-> 1. Run the setup script of the studio `idea` skill; it adds missing files and keeps
->    existing ones. Then replace AGENTS.md and CLAUDE.md with the plugin's templates,
->    first carrying project-specific rules from the old files into the new documents.
-> 2. Rebuild the documents with the studio templates. The product description and
+> Migrate this project to the studio plugin. Do not push and do not start new product
+> work.
+> 1. Prepare. If there are uncommitted changes, stop and ask me what to do with them.
+>    The current branch is the base. Run the project's tests, if it has any, and note
+>    the result. Create the branch `studio-migration` from the base and do steps 2-7
+>    there, committing as you go.
+> 2. Rename AGENTS.md, CLAUDE.md, .claude/settings.json and .codex/config.toml, those
+>    that exist, by adding `.old` to the name. Then run the setup script of the studio
+>    `idea` skill as the skill describes: it creates these files fresh from its
+>    templates, adds the other missing files and keeps the rest. Carry project-specific
+>    rules and settings from the `.old` files into the new files and documents.
+> 3. Rebuild the documents with the studio templates. The product description and
 >    specification become docs/PRODUCT.md, approved, since I agreed them before.
 >    Technical decisions become docs/ARCHITECTURE.md and docs/decisions/, approved.
->    Plans and tasks become docs/TASKS.md: keep finished tasks with their evidence,
->    archive finished stages into docs/history/, and put the current position in Now.
->    Show me durable preferences from old memory files and where you put them.
-> 3. Write the technical documentation from the actual code with the docs skill:
->    components, main flows, data, operations, glossary.
-> 4. After their content is carried over, remove the old documents and toolkit files:
->    DESCRIPTION.md, SPECIFICATION.md, PLAN.md, MEMORY.md, AGENT_RUNS.md, specs/,
->    docs/explain/, .agents/docs, .agents/skills, .claude/skills,
->    .claude/commands/grill.md, .claude/commands/orchestrate.md, .claude/agents/executor.md,
->    .claude/agents/reviewer.md, .codex/agents/executor.toml, .codex/agents/reviewer.toml
->    and .agent-toolkit-manifest.tsv, whichever exist. Keep everything the project added
->    itself.
-> 5. Fill in Project commands from the code, check that the documentation site builds,
->    and show me what changed and what the next task is. Do not start new product work.
+>    Plans and tasks (PLAN.md, TASKS.md, specs/) become docs/TASKS.md: keep finished
+>    tasks with their evidence, archive finished stages into docs/history/, and put the
+>    current position in Now. Note durable preferences from old memory files and where
+>    you put them.
+> 4. Write the technical documentation from the actual code with the docs skill:
+>    components, main flows, data, operations, glossary. Keep the project's own pages in
+>    docs/ and link them into the site.
+> 5. After their content is carried over, remove the old documents and toolkit files,
+>    whichever exist: the `.old` files from step 2; DESCRIPTION.md, SPECIFICATION.md,
+>    PLAN.md, TASKS.md and MEMORY.md in the project root; AGENT_RUNS.md, specs/,
+>    docs/explain/, .agents/docs/ and .agent-toolkit-manifest.tsv;
+>    .claude/commands/grill.md, .claude/commands/orchestrate.md,
+>    .claude/agents/executor.md, .claude/agents/reviewer.md, .codex/agents/executor.toml
+>    and .codex/agents/reviewer.toml; and the toolkit skills ai-eval-design,
+>    bug-forensics, code-review, dependency-vetting, docs-maintenance, grill,
+>    orchestration, planning and security-review in .agents/skills/ and .claude/skills/.
+>    Keep everything the project added itself, its own skills included. Leave the
+>    ignored backup folder .agent-toolkit-backup/ as it is.
+> 6. Fill in Project commands in AGENTS.md from the code.
+> 7. Check the migration against the base branch. Fix what fails and check again:
+>    - The project's code, data and settings are unchanged: `git diff --stat <base>`
+>      lists only the files the setup script created or updated, docs/ and the files
+>      removed in step 5.
+>    - Every file from step 5 that existed is gone. Any other deleted file had its
+>      content moved into a new document.
+>    - Every rule and setting from the base branch's AGENTS.md, CLAUDE.md and agent
+>      settings is in the new files or in a document.
+>    - docs/PRODUCT.md and docs/ARCHITECTURE.md are approved and cover what the old
+>      description, specification and decisions said.
+>    - Every task from the old plans is in docs/TASKS.md or docs/history/, finished ones
+>      with their evidence, and Now shows the current position.
+>    - The documentation site builds without errors, and every embedded code snippet
+>      points to an existing file.
+>    - Every command in Project commands runs, and the tests give the same result as in
+>      step 1.
+> 8. Only when every check passes, merge `studio-migration` into the base branch, so
+>    the base holds only the new version, and delete `studio-migration`. If a check
+>    still fails or the merge conflicts, do not merge: leave both branches as they are.
+> 9. Report to me: each check with its result and evidence, the durable preferences and
+>    where you put them, what changed, whether .agent-toolkit-backup/ exists, whether
+>    the base branch now holds the new version, and what the next task is.
 
 ## Maintain the toolkit
 
