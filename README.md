@@ -74,10 +74,10 @@ python "$HOME/.gemini/agents-toolkit/scripts/antigravity.py" install
 
 Then quit the app and the IDE completely and start them again: Antigravity loads plugins
 and hooks only when it starts, so a window left open keeps working without studio. The
-script links `~/.gemini/config/plugins/studio` to the clone (a junction on Windows), the
-one place where the IDE looks for plugins; `uninstall` instead of `install` removes the
-link. To update, run `git -C "$HOME/.gemini/agents-toolkit" pull` and restart the same
-way.
+script copies the plugin to `~/.gemini/config/plugins/studio`, the one place where the
+IDE looks for plugins (it does not follow links); `uninstall` instead of `install` removes
+the copy. To update, run `git -C "$HOME/.gemini/agents-toolkit" pull`, run `install`
+again and restart the same way.
 
 Projects set up by the plugin also name this marketplace in `.claude/settings.json`, so
 Claude Code offers to install the plugin when you open such a project elsewhere.

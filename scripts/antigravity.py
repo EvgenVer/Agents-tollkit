@@ -3,10 +3,11 @@
 
 Usage: antigravity.py install | uninstall [--config DIR]
 
-install    Link ~/.gemini/config/plugins/studio to plugins/studio of this checkout (a
-           junction on Windows, a symlink elsewhere). The IDE finds plugins only in that
-           folder. Restart Antigravity afterwards; `git pull` here updates the plugin.
-uninstall  Remove that link. The checkout itself is left alone.
+install    Copy plugins/studio of this checkout to ~/.gemini/config/plugins/studio, the
+           one folder where the Antigravity IDE looks for plugins. It does not follow
+           links, so this is a copy: after `git pull`, run install again. Restart
+           Antigravity afterwards.
+uninstall  Remove that copy. A folder this script did not create is left alone.
 
 --config   The Antigravity settings folder (default: ~/.gemini/config).
 """
@@ -15,39 +16,29 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parents[1] / "plugins" / "studio"
+MARKER = ".installed-by-studio"  # names the checkout the copy came from
 
 
 def link_target(path):
     """Where a junction or symlink points, or None for anything else."""
     try:
-        target = os.readlink(path)
+        return Path(os.readlink(path).removeprefix("\\\\?\\"))
     except (OSError, ValueError):
         return None
-    return Path(target.removeprefix("\\\\?\\")).resolve()
 
 
-def make_link(link):
-    link.parent.mkdir(parents=True, exist_ok=True)
-    if os.name == "nt":  # a junction needs no administrator rights, unlike a symlink
-        result = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(PLUGIN)],
-                                capture_output=True, text=True)
-        if result.returncode != 0:
-            raise OSError((result.stderr or result.stdout).strip())
+def remove(copy):
+    """Remove an earlier copy, or a link from an earlier version, never the checkout."""
+    if link_target(copy) is None:
+        shutil.rmtree(copy)
+    elif os.name == "nt":
+        os.rmdir(copy)  # removes the junction, not the folder it points to
     else:
-        link.symlink_to(PLUGIN, target_is_directory=True)
-
-
-def remove_link(link):
-    """Remove only the link itself: deleting the folder tree would empty the checkout."""
-    if os.name == "nt":
-        os.rmdir(link)
-    else:
-        link.unlink()
+        copy.unlink()
 
 
 def warnings(config):
@@ -79,33 +70,29 @@ def main(argv=None):
                         help="Antigravity settings folder (default: ~/.gemini/config)")
     args = parser.parse_args(argv)
 
-    config = Path(args.config).expanduser()
-    link = config / "plugins" / "studio"
-    target = link_target(link)
-    if os.path.lexists(link) and target is None:
-        print(f"{link} exists and is not a link; move it away, then run again.",
+    copy = Path(args.config).expanduser() / "plugins" / "studio"
+    ours = link_target(copy) is not None or (copy / MARKER).is_file()
+    if os.path.lexists(copy) and not ours:
+        print(f"{copy} was not created by this script; move it away, then run again.",
               file=sys.stderr)
         return 1
 
     if args.action == "install":
-        if target != PLUGIN:
-            if target is not None:
-                remove_link(link)
-            make_link(link)
-        print(f"linked {link} -> {PLUGIN}")
-        for line in warnings(config):
+        if os.path.lexists(copy):
+            remove(copy)
+        shutil.copytree(PLUGIN, copy, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        (copy / MARKER).write_text(f"{PLUGIN}\n", encoding="utf-8")
+        print(f"copied {PLUGIN} to {copy}")
+        for line in warnings(copy.parent.parent):
             print(f"warning: {line}")
         print("Quit the Antigravity app and IDE completely and start them again.")
         return 0
 
-    if target is None:
+    if not os.path.lexists(copy):
         print("studio was not installed")
         return 0
-    if target != PLUGIN:
-        print(f"{link} points to another copy ({target}); left as it is.", file=sys.stderr)
-        return 1
-    remove_link(link)
-    print(f"removed {link}")
+    remove(copy)
+    print(f"removed {copy}")
     print("Quit the Antigravity app and IDE completely and start them again.")
     return 0
 
