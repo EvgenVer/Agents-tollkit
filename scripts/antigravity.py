@@ -4,9 +4,9 @@
 Usage: antigravity.py install | uninstall [--config DIR]
 
 install    Copy plugins/studio of this checkout to ~/.gemini/config/plugins/studio, the
-           one folder where the Antigravity IDE looks for plugins. It does not follow
-           links, so this is a copy: after `git pull`, run install again. Restart
-           Antigravity afterwards.
+           one folder where the Antigravity IDE looks for plugins, with the manifest at
+           the root where the IDE expects it. The IDE does not follow links, so this is
+           a copy: after `git pull`, run install again. Restart Antigravity afterwards.
 uninstall  Remove that copy. A folder this script did not create is left alone.
 
 --config   The Antigravity settings folder (default: ~/.gemini/config).
@@ -81,6 +81,9 @@ def main(argv=None):
         if os.path.lexists(copy):
             remove(copy)
         shutil.copytree(PLUGIN, copy, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        # The IDE (2.5) knows only a plugin.json at the plugin root. The checkout keeps the
+        # manifest in .antigravity-plugin/, out of the way of Claude Code and Codex.
+        shutil.copyfile(copy / ".antigravity-plugin" / "plugin.json", copy / "plugin.json")
         (copy / MARKER).write_text(f"{PLUGIN}\n", encoding="utf-8")
         print(f"copied {PLUGIN} to {copy}")
         for line in warnings(copy.parent.parent):

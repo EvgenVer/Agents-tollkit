@@ -41,6 +41,10 @@ class Install(unittest.TestCase):
             self.assertEqual((self.copy / relative).read_bytes(),
                              (PLUGIN / relative).read_bytes(), relative)
         self.assertFalse(list(self.copy.rglob("__pycache__")))
+        # The IDE reads the manifest only from the plugin root; the checkout has none there.
+        self.assertEqual((self.copy / "plugin.json").read_bytes(),
+                         (PLUGIN / ".antigravity-plugin" / "plugin.json").read_bytes())
+        self.assertFalse((PLUGIN / "plugin.json").exists())
 
     def test_install_again_replaces_the_copy(self):
         run("install", self.config)
