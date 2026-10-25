@@ -136,8 +136,15 @@ each git command it runs outside its sandbox; allow them.
 > 2. Rename AGENTS.md, CLAUDE.md, .claude/settings.json and .codex/config.toml, those
 >    that exist, by adding `.old` to the name. Then run the setup script of the studio
 >    `idea` skill as the skill describes: it creates these files fresh from its
->    templates, adds the other missing files and keeps the rest. Carry project-specific
->    rules and settings from the `.old` files into the new files and documents.
+>    templates, adds the other missing files and keeps the rest, and commits what it
+>    created (in Codex, commit them yourself before any edit). The new AGENTS.md and
+>    CLAUDE.md replace the old ones: do not bring back the old rules on how agents work
+>    (workflow, planning, documents, memory, reviews, subagents, safety), because the
+>    new rules cover them. Carry over only what belongs to this project: facts about the
+>    product and its code go into the documents, rules only this project needs (for
+>    example, a folder that must not be changed) go into a short `## Project rules`
+>    section before `Project commands`, and the project's own settings go into the new
+>    settings files.
 > 3. Rebuild the documents with the studio templates. The product description and
 >    specification become docs/PRODUCT.md, approved, since I agreed them before.
 >    Technical decisions become docs/ARCHITECTURE.md and docs/decisions/, approved.
@@ -166,8 +173,13 @@ each git command it runs outside its sandbox; allow them.
 >      removed in step 5.
 >    - Every file from step 5 that existed is gone. Any other deleted file had its
 >      content moved into a new document.
->    - Every rule and setting from the base branch's AGENTS.md, CLAUDE.md and agent
->      settings is in the new files or in a document.
+>    - AGENTS.md and CLAUDE.md are the new versions: `git diff` against the step 2
+>      commit that created them shows no change in CLAUDE.md and, in AGENTS.md, only
+>      Project commands and Project rules. None of the old rules on how agents work
+>      came back.
+>    - Every project-specific rule and setting from the base branch's AGENTS.md,
+>      CLAUDE.md and agent settings is in Project rules, a document or the new settings
+>      files.
 >    - docs/PRODUCT.md and docs/ARCHITECTURE.md are approved and cover what the old
 >      description, specification and decisions said.
 >    - Every task from the old plans is in docs/TASKS.md or docs/history/, finished ones
@@ -179,9 +191,10 @@ each git command it runs outside its sandbox; allow them.
 > 8. Only when every check passes, merge `studio-migration` into the base branch, so
 >    the base holds only the new version, and delete `studio-migration`. If a check
 >    still fails or the merge conflicts, do not merge: leave both branches as they are.
-> 9. Report to me: each check with its result and evidence, the durable preferences and
->    where you put them, what changed, whether .agent-toolkit-backup/ exists, whether
->    the base branch now holds the new version, and what the next task is.
+> 9. Report to me: each check with its result and evidence, the project rules and
+>    durable preferences you carried over and where you put them, what changed, whether
+>    .agent-toolkit-backup/ exists, whether the base branch now holds the new version,
+>    and what the next task is.
 
 ## Maintain the toolkit
 
