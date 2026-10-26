@@ -11,12 +11,14 @@ session-start  Give the agent the `Now` section of docs/TASKS.md and reminders a
 guard          Deny reading secrets and commands that destroy work. Ask the owner before
                pushing, installing software globally, or touching files outside the
                project. Codex and Antigravity hooks cannot ask, so there those are denied.
-stop           Before the agent stops, make sure changed work is recorded in TASKS.md and
-               that documentation pages about the changed files are still true.
+stop           Before the agent stops, make sure work changed or committed in this session
+               is recorded in TASKS.md and that documentation pages about the changed,
+               deleted or renamed files are still true.
 
 A failure inside a hook never blocks the agent: errors go to stderr and exit 0.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -24,6 +26,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 TASKS = Path("docs") / "TASKS.md"
@@ -70,6 +73,11 @@ CD_COMMANDS = {"cd", "chdir", "sl", "set-location", "pushd", "push-location"}
 POP_COMMANDS = {"popd", "pop-location"}
 
 SETUP_ONLY = {".git", ".claude", ".codex", ".agents", ".vscode", ".idea"}
+# The commit each session started from, so stop also sees work committed since then.
+SESSIONS = Path(tempfile.gettempdir()) / "studio-hooks" / "sessions"
+SESSION_DAYS = 30
+# Pages that may name deleted files: the work log, finished stages and past decisions.
+HISTORY_PAGES = [TASKS, Path("docs") / "history", Path("docs") / "decisions"]
 
 DENY, ASK = "deny", "ask"
 
@@ -155,14 +163,12 @@ def project_root(cwd):
     return start
 
 
-def changed_files(root):
-    """Absolute paths of files with uncommitted changes, untracked files included."""
-    top = git_toplevel(root)
-    output = run_git(top, "status", "--porcelain", "-z", "-uall") if top else None
-    if not output:
-        return []
-    entries = output.split("\0")
-    paths = []
+def uncommitted(top):
+    """(changed, removed) absolute paths of uncommitted changes, untracked files included;
+    removed holds deleted files and the old paths of renamed ones."""
+    output = run_git(top, "status", "--porcelain", "-z", "-uall")
+    entries = output.split("\0") if output else []
+    changed, removed = [], []
     index = 0
     while index < len(entries):
         entry = entries[index]
@@ -170,9 +176,60 @@ def changed_files(root):
         if len(entry) < 4:
             continue
         if entry[0] in "RC":
+            if entry[0] == "R" and index < len(entries):
+                removed.append(top / entries[index])
             index += 1  # a rename or copy is followed by its original path
-        paths.append(top / entry[3:])
-    return paths
+        (removed if "D" in entry[:2] else changed).append(top / entry[3:])
+    return changed, removed
+
+
+def committed_since(top, commit):
+    """(changed, removed) paths in commits made after `commit`, in the same shape."""
+    output = run_git(top, "diff", "--name-status", "-z", "--no-renames", commit, "HEAD")
+    fields = output.split("\0") if output else []
+    changed, removed = [], []
+    for status, path in zip(fields[::2], fields[1::2]):
+        (removed if status.startswith("D") else changed).append(top / path)
+    return changed, removed
+
+
+def changed_files(root):
+    """Absolute paths of files with uncommitted changes, untracked files included."""
+    top = git_toplevel(root)
+    return [path for paths in uncommitted(top) for path in paths] if top else []
+
+
+def session_id(payload):
+    return str(payload.get("session_id") or payload.get("conversationId") or "")
+
+
+def start_file(session, top):
+    digest = hashlib.sha1(f"{session}|{top}".encode("utf-8")).hexdigest()[:20]
+    return SESSIONS / f"{digest}.json"
+
+
+def remember_start(payload):
+    """Note the commit this session starts from; a resumed session keeps its first one."""
+    session, top = session_id(payload), git_toplevel(payload.get("cwd") or os.getcwd())
+    head = run_git(top, "rev-parse", "--verify", "HEAD") if session and top else None
+    path = start_file(session, top) if head else None
+    if not path or path.exists():
+        return
+    try:
+        SESSIONS.mkdir(parents=True, exist_ok=True)
+        for old in SESSIONS.glob("*.json"):
+            if old.stat().st_mtime < time.time() - SESSION_DAYS * 86400:
+                old.unlink()
+        path.write_text(json.dumps({"head": head.strip()}), encoding="utf-8")
+    except OSError:
+        pass  # without the note, stop checks uncommitted work only
+
+
+def start_commit(session, top):
+    try:
+        return json.loads(start_file(session, top).read_text(encoding="utf-8"))["head"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def section(text, title):
@@ -247,6 +304,7 @@ def session_context(cwd):
 
 
 def session_start(payload, host="claude"):
+    remember_start(payload)
     context = session_context(Path(payload.get("cwd") or os.getcwd()).resolve())
     if host == "antigravity":
         emit({"injectSteps": [{"systemMessage": {"systemMessage": context}}]} if context else {})
@@ -594,52 +652,95 @@ def guard(payload, host="claude"):
 
 # --- stop ----------------------------------------------------------------------------
 
+def project_files(root, paths, kept):
+    """{path relative to the project: path} for files outside docs/ that exist (kept) or
+    no longer exist (not kept)."""
+    root = root.resolve()
+    docs = root / "docs"
+    found = {}
+    for path in paths:
+        path = path.resolve()
+        if path.is_file() == kept and is_inside(path, root) and not is_inside(path, docs):
+            found[path.relative_to(root).as_posix()] = path
+    return found
+
+
+def doc_pages(root, skip):
+    docs = (root / "docs").resolve()
+    skip = [(root / s).resolve() for s in skip]
+    pages = sorted(docs.rglob("*.md")) if docs.is_dir() else []
+    return [page.resolve() for page in pages
+            if not any(page.resolve() == s or is_inside(page.resolve(), s) for s in skip)]
+
+
+def page_hits(root, pages, mentioned):
+    """'page (file, ...)' for each page that mentions one of the files `mentioned` picks."""
+    found = []
+    for page in pages:
+        hits = mentioned(page, read_text(page))
+        if hits:
+            found.append(f"{page.relative_to(root.resolve()).as_posix()} ({', '.join(hits[:3])})")
+    return found
+
+
 def stale_pages(root, changed):
     """Documentation pages that mention changed files and are older than them."""
-    docs = (root / "docs").resolve()
-    if not docs.is_dir():
-        return []
-    sources = {}
-    for path in changed:
-        path = path.resolve()
-        if path.is_file() and not is_inside(path, docs) and is_inside(path, root.resolve()):
-            sources[path.relative_to(root.resolve()).as_posix()] = path.stat().st_mtime
+    sources = {rel: path.stat().st_mtime
+               for rel, path in project_files(root, changed, True).items()}
     if not sources:
         return []
-    skip = [(root / TASKS).resolve(), docs / "history"]
-    pages = []
-    for page in sorted(docs.rglob("*.md")):
-        page = page.resolve()
-        if any(page == s or is_inside(page, s) for s in skip):
-            continue
-        text, edited = read_text(page), page.stat().st_mtime
-        hits = [rel for rel, changed_at in sources.items() if changed_at > edited and rel in text]
-        if hits:
-            pages.append(f"{page.relative_to(root.resolve()).as_posix()} ({', '.join(hits[:3])})")
-    return pages
+    return page_hits(root, doc_pages(root, [TASKS, Path("docs") / "history"]),
+                     lambda page, text: [rel for rel, changed_at in sources.items()
+                                         if changed_at > page.stat().st_mtime and rel in text])
 
 
-def stop_reason(cwd):
+def pages_about_removed(root, removed):
+    """Documentation pages that still mention deleted or renamed files."""
+    gone = project_files(root, removed, False)
+    if not gone:
+        return []
+    return page_hits(root, doc_pages(root, HISTORY_PAGES),
+                     lambda page, text: [rel for rel in gone if rel in text])
+
+
+def stop_reason(cwd, session=""):
     """Why the agent should not stop yet, or None."""
     root = project_root(cwd)
     tasks = root / TASKS
-    if not tasks.is_file():
+    top = git_toplevel(root)
+    if not tasks.is_file() or not top:
         return None
-    changed = [p for p in changed_files(root) if p.resolve() != tasks.resolve()]
+    tasks = tasks.resolve()
+    changed, removed = uncommitted(top)
+    since = start_commit(session, top) if session else None
+    committed, committed_removed = committed_since(top, since) if since else ([], [])
     reasons = []
-    times = [p.stat().st_mtime for p in changed if p.exists()]
+    pending = [p for p in changed + removed if p.resolve() != tasks]
+    times = [p.stat().st_mtime for p in pending if p.exists()]
     if times and tasks.stat().st_mtime < max(times):
         reasons.append(
-            f"{len(changed)} changed file(s) are newer than docs/TASKS.md. If the work is "
+            f"{len(pending)} changed file(s) are newer than docs/TASKS.md. If the work is "
             "verified, record the evidence there and commit it. If it is unfinished or you "
             "are waiting for the owner, update the Now section with the next step. If the "
             "changes are generated files, add them to .gitignore.")
-    pages = stale_pages(root, changed)
+    elif (committed or committed_removed) and tasks not in {
+            p.resolve() for p in committed + changed}:
+        reasons.append(
+            f"{len(committed + committed_removed)} file(s) were committed in this session, "
+            "but docs/TASKS.md was not updated. Record the evidence of the finished work "
+            "there, or update the Now section with the next step, and commit it.")
+    pages = stale_pages(root, changed + committed)
     if pages:
         reasons.append(
             "These documentation pages mention files you changed after the page was last "
             f"edited: {'; '.join(pages[:5])}. Check that they still describe the code, and "
             "update them if they do not.")
+    gone = pages_about_removed(root, removed + committed_removed)
+    if gone:
+        reasons.append(
+            "These documentation pages mention files that were deleted or renamed: "
+            f"{'; '.join(gone[:5])}. Point them to the current files, or remove what no "
+            "longer exists.")
     return "Before you stop: " + " ".join(reasons) if reasons else None
 
 
@@ -649,7 +750,7 @@ def stop(payload, host="claude"):
         return
     if payload.get("stop_hook_active"):
         return
-    reason = stop_reason(payload.get("cwd"))
+    reason = stop_reason(payload.get("cwd"), session_id(payload))
     if reason:
         emit({"decision": "block", "reason": reason})
 
@@ -728,7 +829,7 @@ def antigravity_stop(payload):
     reason = None
     if (payload.get("terminationReason", "NO_TOOL_CALL") == "NO_TOOL_CALL"
             and sent_back.get(conversation) != run - 1):
-        reason = stop_reason(payload.get("cwd"))
+        reason = stop_reason(payload.get("cwd"), conversation)
     if not reason:
         emit({"decision": "stop"})
         return

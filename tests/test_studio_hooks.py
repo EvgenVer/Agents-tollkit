@@ -346,6 +346,64 @@ class Stop(ProjectCase):
         (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
         self.assertIsNone(self.stop())
 
+    def start(self, session):
+        run_hook("session-start", {"cwd": str(self.root), "session_id": session,
+                                   "source": "startup"})
+
+    def commit(self, message):
+        git(self.root, "commit", "-q", "-a", "-m", message)
+
+    def test_work_committed_without_a_record_blocks(self):
+        session = str(uuid.uuid4())
+        self.start(session)
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+        self.commit("change")
+        self.assertIsNone(self.stop())  # without the session the commit is not seen
+        self.assertIn("committed in this session", self.stop(session_id=session)["reason"])
+        self.start(session)  # a resumed session keeps the commit it started from
+        self.assertIn("committed in this session", self.stop(session_id=session)["reason"])
+        with open(self.root / "docs" / "TASKS.md", "a", encoding="utf-8") as tasks:
+            tasks.write("- [x] T2 Save a book — check: click save — done\n")
+        self.commit("record")
+        self.assertIsNone(self.stop(session_id=session))
+
+    def test_pages_about_committed_and_deleted_files_must_be_checked(self):
+        (self.root / "old.py").write_text("x = 1\n", encoding="utf-8")
+        page = self.root / "docs" / "components" / "app.md"
+        decision = self.root / "docs" / "decisions" / "0001-old.md"
+        for path, text in [(page, "`app.py` calls `old.py`."), (decision, "We kept `old.py`.")]:
+            path.parent.mkdir(parents=True)
+            path.write_text(text + "\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        self.commit("docs")
+        session = str(uuid.uuid4())
+        self.start(session)
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+        set_mtime(self.root / "app.py", 5)
+        git(self.root, "rm", "-q", "old.py")
+        with open(self.root / "docs" / "TASKS.md", "a", encoding="utf-8") as tasks:
+            tasks.write("- [x] T2 Save a book — check: click save — done\n")
+        self.commit("work")
+        reason = self.stop(session_id=session)["reason"]
+        self.assertIn("docs/components/app.md (app.py)", reason)
+        self.assertIn("deleted or renamed: docs/components/app.md (old.py)", reason)
+        self.assertNotIn("0001-old.md", reason)  # past decisions may name old files
+        self.assertNotIn("not updated", reason)
+        page.write_text("`app.py` does the work.\n", encoding="utf-8")
+        set_mtime(page, 20)
+        self.commit("update the page")
+        self.assertIsNone(self.stop(session_id=session))
+
+    def test_pages_about_uncommitted_deletions_must_be_checked(self):
+        page = self.root / "docs" / "components" / "app.md"
+        page.parent.mkdir()
+        page.write_text("The entry point is `app.py`.\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        self.commit("docs")
+        os.remove(self.root / "app.py")
+        self.assertIn("deleted or renamed: docs/components/app.md (app.py)",
+                      self.stop()["reason"])
+
 
 class Robustness(unittest.TestCase):
     def test_bad_input_never_blocks(self):
@@ -495,6 +553,14 @@ class Antigravity(ProjectCase):
         self.assertEqual(stop(1), "stop")  # the run that was sent back may stop
         self.assertEqual(stop(2), "continue")  # the next turn is checked again
         self.assertEqual(stop(4, "USER_CANCELED"), "stop")
+
+    def test_stop_sees_work_committed_in_the_conversation(self):
+        run_hook("session-start", self.payload("app", "SessionStart"), "--host", "antigravity")
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+        git(self.root, "commit", "-q", "-a", "-m", "change")
+        output = run_hook("stop", self.payload("app", "Stop"), "--host", "antigravity")
+        self.assertEqual(output["decision"], "continue")
+        self.assertIn("committed in this session", output["reason"])
 
 
 class Packaging(unittest.TestCase):
