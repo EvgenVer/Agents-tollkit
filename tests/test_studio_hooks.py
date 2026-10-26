@@ -55,6 +55,12 @@ def set_mtime(path, offset):
     os.utime(path, (moment, moment))
 
 
+def forget_start(test, session, root):
+    """Remove, once the test ends, the note session start keeps in the temp folder."""
+    note = hooks.start_file(session, hooks.git_toplevel(root))
+    test.addCleanup(note.unlink, missing_ok=True)
+
+
 class ProjectCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -349,6 +355,7 @@ class Stop(ProjectCase):
     def start(self, session):
         run_hook("session-start", {"cwd": str(self.root), "session_id": session,
                                    "source": "startup"})
+        forget_start(self, session, self.root)
 
     def commit(self, message):
         git(self.root, "commit", "-q", "-a", "-m", message)
@@ -426,6 +433,7 @@ class Antigravity(ProjectCase):
         self.artifacts = Path(self.tmp.name).resolve() / "brain" / "conversation"
         self.artifacts.mkdir(parents=True)
         self.conversation = str(uuid.uuid4())
+        forget_start(self, self.conversation, self.root)
 
     def payload(self, surface, event, **args):
         """A recorded payload moved to this project; args replace recorded tool arguments."""
