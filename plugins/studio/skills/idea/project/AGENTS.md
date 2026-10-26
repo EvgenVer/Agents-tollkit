@@ -29,8 +29,10 @@ details: documents explain the code and point to it instead of copying it.
 1. No approved `docs/PRODUCT.md` → use the `idea` skill to brainstorm it with the owner.
 2. No approved `docs/ARCHITECTURE.md` → use the `design` skill to agree the architecture
    and stack with the owner.
-3. Otherwise take the next task in `docs/TASKS.md` and keep going through tasks and
-   stages without waiting for permission.
+3. Otherwise the owner's message sets the scope. "Continue", a task, a stage or the
+   plan: take the next task in `docs/TASKS.md` and keep going through tasks and stages
+   without waiting for permission. A question, an explanation, an analysis or a single
+   fix: do it, report, and stop.
 
 When a request changes what the product does, update `docs/PRODUCT.md` with the owner
 first. When it changes the architecture or the stack, go back to the `design` skill.
