@@ -91,7 +91,7 @@ The agent works without asking for each step. What stops it is deterministic:
 | Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project. On Windows it works only after the sandbox setup below | not set up by studio; Antigravity's own permission settings apply |
 | Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same | the same |
 | Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects) | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked | denied with an explanation as in Codex, because Antigravity shows no prompt when a hook asks; the agent's own folders under `~/.gemini` stay readable and its plan artifacts writable |
-| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md, empty project commands; before stopping: record evidence, update Now, check pages that mention changed files | the same | the same; before stopping, the agent is sent back once per turn |
+| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md, empty project commands; before stopping: record evidence for work changed or committed in the session, update Now, check pages that mention changed or deleted files | the same | the same; before stopping, the agent is sent back once per turn |
 
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
 cannot see. Commit often, and keep backups of important folders outside your projects.
@@ -129,10 +129,13 @@ each git command it runs outside its sandbox; allow them.
 
 > Migrate this project to the studio plugin. Do not push and do not start new product
 > work.
-> 1. Prepare. If there are uncommitted changes, stop and ask me what to do with them.
->    The current branch is the base. Run the project's tests, if it has any, and note
->    the result. Create the branch `studio-migration` from the base and do steps 2-7
->    there, committing as you go.
+> 1. Prepare. If the project is not in git yet, run `git init`, write a .gitignore that
+>    keeps out secrets, local environments, generated files and large data, check with
+>    `git status` that none of them is listed, and commit the project as it is. If there
+>    are uncommitted changes, stop and ask me what to do with them. The current branch
+>    is the base. Run the project's tests, if it has any, and note the result. Create
+>    the branch `studio-migration` from the base and do steps 2-7 there, committing as
+>    you go.
 > 2. Rename AGENTS.md, CLAUDE.md, .claude/settings.json and .codex/config.toml, those
 >    that exist, by adding `.old` to the name. Then run the setup script of the studio
 >    `idea` skill as the skill describes: it creates these files fresh from its
@@ -154,7 +157,8 @@ each git command it runs outside its sandbox; allow them.
 >    you put them.
 > 4. Write the technical documentation from the actual code with the docs skill:
 >    components, main flows, data, operations, glossary. Keep the project's own pages in
->    docs/ and link them into the site.
+>    docs/ and link them into the site. Embed code by the region markers the docs skill
+>    describes: adding these marker comments is the only change allowed in the code.
 > 5. After their content is carried over, remove the old documents and toolkit files,
 >    whichever exist: the `.old` files from step 2; DESCRIPTION.md, SPECIFICATION.md,
 >    PLAN.md, TASKS.md and MEMORY.md in the project root; AGENT_RUNS.md, specs/,
@@ -169,8 +173,9 @@ each git command it runs outside its sandbox; allow them.
 > 6. Fill in Project commands in AGENTS.md from the code.
 > 7. Check the migration against the base branch. Fix what fails and check again:
 >    - The project's code, data and settings are unchanged: `git diff --stat <base>`
->      lists only the files the setup script created or updated, docs/ and the files
->      removed in step 5.
+>      lists only the files the setup script created or updated, docs/, the files
+>      removed in step 5 and code files with new region markers, and in those code
+>      files `git diff <base>` shows only added `--8<--` marker lines.
 >    - Every file from step 5 that existed is gone. Any other deleted file had its
 >      content moved into a new document.
 >    - AGENTS.md and CLAUDE.md are the new versions: `git diff` against the step 2
