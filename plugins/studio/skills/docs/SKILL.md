@@ -31,6 +31,9 @@ docs/
 ```
 
 Create a page when there is something real to say; add it to `nav` at the same time.
+Size the site to the product: a product with one part gets one component page that also
+walks through its main scenario, and separate flow pages appear only when scenarios
+cross several parts.
 
 ## Page types
 

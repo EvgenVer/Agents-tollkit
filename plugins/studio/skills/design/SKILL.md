@@ -40,6 +40,10 @@ For each decision:
 - when the comparison needs more than a few paragraphs or a picture, write a comparison
   page with a diagram (`docs` skill) and link it in your question.
 
+Ask only about the topics that apply. A small tool with one part, no server and no
+outside services can be settled in one message that proposes the form, the language and
+the few libraries with their alternatives; the owner still approves it.
+
 Ask one question at a time, or a few closely related ones, using the host's question
 tool when it has one. Prefer widely used, well-documented technology that runs on the
 owner's computer and that you can run and check yourself, with as few moving parts as the
@@ -47,14 +51,17 @@ product allows.
 
 ## Record
 
-1. Write one page per approved decision, `docs/decisions/NNNN-<slug>.md`, from
-   [assets/decision.md](assets/decision.md), in the owner's language.
+1. Write a decision page, `docs/decisions/NNNN-<slug>.md`, from
+   [assets/decision.md](assets/decision.md), in the owner's language, for each approved
+   choice that had real alternatives and is costly to reverse: the architecture, a
+   language or framework, data storage, hosting, a library that shapes the code. Record
+   smaller choices as rows of the stack table in `docs/ARCHITECTURE.md`.
 2. Write `docs/ARCHITECTURE.md` from [assets/ARCHITECTURE.md](assets/ARCHITECTURE.md):
    the big picture with a diagram first, then parts, stack, data, outside services and
    the decision log.
-3. With the `docs` skill, write the pages that can already be written: one page per
-   part and the main flow, marked as planned until the code exists. Add every page to
-   `nav` in `zensical.toml`.
+3. With the `docs` skill, write the pages that can already be written, sized as it
+   describes: the parts and the main flow, marked as planned until the code exists.
+   Add every page to `nav` in `zensical.toml`.
 
 ## Plan the stages
 
