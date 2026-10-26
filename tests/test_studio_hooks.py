@@ -110,6 +110,18 @@ class Secrets(ProjectCase):
         self.assertDecision(None, "Bash", ["cp .env.example .env",
                                            'git commit -m "Ignore .env files"'])
 
+    def test_quoted_paths_with_spaces(self):
+        folder = self.root / "my config"
+        folder.mkdir()
+        (folder / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+        self.assertDecision("deny", "PowerShell", [f'Get-Content "{folder / ".env"}"',
+                                                   "Get-Content 'my config\\.env'"])
+        self.assertDecision("deny", "Bash", ['cat "my config/.env"',
+                                             'cd "my config" && cat .env'])
+        # Prose that only looks like a secret path names no file, so it passes.
+        self.assertDecision(None, "Bash", ['git commit -m "drop old config/.env"',
+                                           'git commit -m "rotate server.key"'])
+
 
 class Git(ProjectCase):
     def test_destructive_git_is_denied(self):
@@ -127,6 +139,18 @@ class Git(ProjectCase):
 
     def test_push_needs_the_owner(self):
         self.assertDecision("ask", "Bash", ["git push origin main", "git add . && git push"])
+
+    def test_options_before_the_git_command(self):
+        self.assertDecision("deny", "Bash", [
+            "git -C . reset --hard", f'git -C "{self.root}" clean -fd',
+            "git --no-pager checkout -- .", "git -c core.pager=cat push --force",
+            "git push origin main; git reset --hard"])
+        self.assertDecision("ask", "Bash", [
+            "git -C . push origin main", "git -c user.name=x push", "git --no-pager push",
+            "git --git-dir .git --work-tree . push"])
+        self.assertDecision(None, "Bash", [
+            "git -C . status", 'git -C "some dir" log -1', "git --version",
+            'git commit -m "use git -C . reset --hard with care"'])
 
 
 class Deleting(ProjectCase):
@@ -179,6 +203,18 @@ class OutsideFiles(ProjectCase):
             "New-Item -ItemType Directory -Path src"])
         patch = "*** Begin Patch\n*** Add File: src/new.py\n+x = 1\n*** End Patch"
         self.assertIsNone(self.decision("apply_patch", command=patch))
+
+    def test_a_change_of_folder_is_followed(self):
+        documents = OUTSIDE.parent
+        self.assertDecision("ask", "PowerShell", [
+            f'cd "{documents}"; Set-Content notes.txt -Value 1',
+            f"Set-Location -Path {documents}; Get-Process | Out-File procs.txt",
+            f"pushd {documents} && echo hi > x.txt"])
+        self.assertDecision(None, "PowerShell", [
+            "cd src; Set-Content notes.txt -Value 1",
+            f"pushd {documents}; popd; Set-Content notes.txt -Value 1"])
+        self.assertDecision("deny", "Bash", ["cd .. && rm -rf project",
+                                             f"cd {documents} && rm -rf ."])
 
     def test_project_temp_and_agent_folders_are_allowed(self):
         notes = Path.home() / ".claude" / "projects" / "demo" / "memory" / "note.md"

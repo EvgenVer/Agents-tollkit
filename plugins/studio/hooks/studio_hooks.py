@@ -60,6 +60,14 @@ SWITCHES = POWERSHELL_FLAGS | {"-append", "-nonewline", "-noclobber", "-passthru
 NULL_TARGETS = {"/dev/null", "$null", "nul", "&1", "&2"}
 REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(\"[^\"]+\"|'[^']+'|[^\s;|&<>]+)")
 QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+# Options git takes before its subcommand (git -C dir, -c key=value, --no-pager, ...).
+ARGUMENT = r"(?:\"[^\"]*\"|'[^']*'|[^\s;|&]+)"
+GIT_OPTION = (rf"(?:-[Cc]\s+{ARGUMENT}|--(?:git-dir|work-tree|namespace)\s+{ARGUMENT}"
+              rf"|-{{1,2}}[A-Za-z][\w-]*(?:={ARGUMENT}?)?)")
+GIT_GLOBAL_OPTIONS = re.compile(rf"(?<![\w./\\-])git(?:\.exe)?(?:\s+{GIT_OPTION})+(?=\s)")
+# Commands that change the folder the rest of a command line runs in.
+CD_COMMANDS = {"cd", "chdir", "sl", "set-location", "pushd", "push-location"}
+POP_COMMANDS = {"popd", "pop-location"}
 
 SETUP_ONLY = {".git", ".claude", ".codex", ".agents", ".vscode", ".idea"}
 
@@ -326,6 +334,26 @@ def command_words(segment):
     return [word.strip("'\"") for word in words]
 
 
+def located_segments(command, cwd):
+    """(segment, folder it runs in) for each segment, following cd, Set-Location, pushd
+    and popd to literal paths. A folder held in a variable is not followed."""
+    located, stack = [], []
+    for segment in command_segments(command):
+        located.append((segment, cwd))
+        words = command_words(segment)
+        name = words[0].lstrip("(").lower() if words else ""
+        if name in POP_COMMANDS:
+            cwd = stack.pop() if stack else cwd
+        elif name in CD_COMMANDS:
+            targets = [w for w in words[1:]
+                       if not w.startswith("-") and not re.fullmatch(r"/[a-zA-Z]", w)]
+            if name in {"pushd", "push-location"}:
+                stack.append(cwd)
+            if targets and not targets[0].startswith(("$", "%")):
+                cwd = str(resolve_path(targets[0], cwd))
+    return located
+
+
 def strip_prose(segment):
     """Drop quoted text with spaces: it is prose (a commit message, an echo), not a path.
     Quotes pair from left to right, so "dir" "a prompt" keeps "dir" and drops the prompt."""
@@ -333,16 +361,25 @@ def strip_prose(segment):
                       segment)
 
 
-def secret_in_command(command):
-    for segment in command_segments(command):
-        words = command_words(segment)
-        if (len(words) == 3 and words[0].lower() in {"cp", "copy", "copy-item"}
-                and SAFE_SUFFIX.search(words[1]) and is_secret_path(words[2])):
-            continue  # copying .env.example into place creates a file without reading one
-        tokens = re.findall(r"[^\s'\"`;|&<>()=,]+", strip_prose(segment))
-        if any(is_secret_path(token) for token in tokens):
-            return True
-    return False
+def exists(path):
+    try:
+        return path.exists()
+    except (OSError, ValueError):
+        return False
+
+
+def secret_in_segment(segment, cwd):
+    words = command_words(segment)
+    if (len(words) == 3 and words[0].lower() in {"cp", "copy", "copy-item"}
+            and SAFE_SUFFIX.search(words[1]) and is_secret_path(words[2])):
+        return False  # copying .env.example into place creates a file without reading one
+    tokens = re.findall(r"[^\s'\"`;|&<>()=,]+", strip_prose(segment))
+    if any(is_secret_path(token) for token in tokens):
+        return True
+    # Quoted text with spaces is a path, not prose, when it names a secret file that exists.
+    return any(re.search(r"\s", value) and is_secret_path(value)
+               and exists(resolve_path(value, cwd))
+               for value in (quoted[1:-1] for quoted in QUOTED.findall(segment)))
 
 
 def deletion(segment):
@@ -455,28 +492,34 @@ def global_install(segment, venv_active):
     return not (in_venv or explicit_target)
 
 
-def shell_decision(command, cwd, root, payload):
-    if secret_in_command(command):
-        return DENY, SECRET_REASON
-    venv_active = False
-    for segment in command_segments(command):
-        prose_free = strip_prose(segment)
-        for pattern, reason in DESTRUCTIVE_PATTERNS:
-            if pattern.search(prose_free):
-                return DENY, reason
-        risk = deletion_risk(segment, cwd, root, payload)
-        if risk:
-            return risk
-        for target in write_targets(segment):
-            reason = outside_project(resolve_path(target, cwd), root, payload, True)
-            if reason:
-                return ASK, reason
-        if PUSH_PATTERN.search(prose_free):
-            return ASK, PUSH_REASON
-        if global_install(segment, venv_active):
-            return ASK, INSTALL_REASON
-        venv_active = venv_active or "activate" in prose_free.lower()
+def segment_decision(segment, cwd, root, payload, venv_active):
+    prose_free = strip_prose(GIT_GLOBAL_OPTIONS.sub("git", segment))
+    for pattern, reason in DESTRUCTIVE_PATTERNS:
+        if pattern.search(prose_free):
+            return DENY, reason
+    risk = deletion_risk(segment, cwd, root, payload)
+    if risk:
+        return risk
+    for target in write_targets(segment):
+        reason = outside_project(resolve_path(target, cwd), root, payload, True)
+        if reason:
+            return ASK, reason
+    if PUSH_PATTERN.search(prose_free):
+        return ASK, PUSH_REASON
+    if global_install(segment, venv_active):
+        return ASK, INSTALL_REASON
     return None
+
+
+def shell_decision(command, cwd, root, payload):
+    located = located_segments(command, cwd)
+    if any(secret_in_segment(segment, where) for segment, where in located):
+        return DENY, SECRET_REASON
+    results, venv_active = [], False
+    for segment, where in located:
+        results.append(segment_decision(segment, where, root, payload, venv_active))
+        venv_active = venv_active or "activate" in strip_prose(segment).lower()
+    return strongest(results)
 
 
 def guard_decision(payload):
