@@ -33,6 +33,7 @@ TASKS = Path("docs") / "TASKS.md"
 ARCHITECTURE = Path("docs") / "ARCHITECTURE.md"
 MAX_CONTEXT_CHARS = 4000
 MAX_TASKS_LINES = 150
+MAX_NOW_CHARS = 2500
 
 SECRET_NAME = re.compile(
     r"^(\.env(\..+)?|.+\.(pem|key|p12|pfx|jks|keystore)|id_(rsa|dsa|ecdsa|ed25519)"
@@ -298,20 +299,28 @@ def session_context(cwd):
         return NEW_FOLDER_CONTEXT if is_new_folder(cwd) else None
     text = read_text(tasks)
     now = section(text, "Now")
-    parts = ["Where work stands, from docs/TASKS.md (section Now):",
-             now or "(The Now section is missing; restore it before continuing.)"]
+    notes = []
     changes = changed_files(root)
     if changes:
-        parts.append(f"There are uncommitted changes in {len(changes)} file(s); check "
+        notes.append(f"There are uncommitted changes in {len(changes)} file(s); check "
                      "whether they belong to the active task before starting new work.")
     lines = len(text.splitlines())
     if lines > MAX_TASKS_LINES:
-        parts.append(f"docs/TASKS.md has {lines} lines. Move finished stages to "
+        notes.append(f"docs/TASKS.md has {lines} lines. Move finished stages to "
                      "docs/history/stage-<N>.md and leave one line each, as AGENTS.md says.")
+    if len(now) > MAX_NOW_CHARS:
+        notes.append(f"The Now section has {len(now)} characters. Cut it to where work "
+                     "stopped, the next step and what waits for the owner, about ten lines, "
+                     "and move evidence to docs/history/ or linked files.")
     if project_commands_missing(root):
-        parts.append("The architecture is approved but Project commands in AGENTS.md is "
+        notes.append("The architecture is approved but Project commands in AGENTS.md is "
                      "empty. Filling it is part of task T1 \"Project skeleton\".")
-    return "\n".join(parts)[:MAX_CONTEXT_CHARS]
+    header = "Where work stands, from docs/TASKS.md (section Now):"
+    room = MAX_CONTEXT_CHARS - len(header) - sum(len(note) + 1 for note in notes) - 2
+    if len(now) > room:
+        now = now[:max(room - 40, 0)].rstrip() + "\n(cut here; read the rest in the file)"
+    body = now or "(The Now section is missing; restore it before continuing.)"
+    return "\n".join([header, body, *notes])[:MAX_CONTEXT_CHARS]
 
 
 def session_start(payload, host="claude"):

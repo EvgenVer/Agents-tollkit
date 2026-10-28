@@ -301,6 +301,19 @@ class SessionStart(ProjectCase):
                           encoding="utf-8")
         self.assertNotIn("Project skeleton", self.context())
 
+    def test_flags_a_long_now_section_and_keeps_the_reminders(self):
+        evidence = "".join(f"- Evidence {n}: " + "measured and recorded. " * 6 + "\n"
+                           for n in range(40))
+        (self.root / "docs" / "TASKS.md").write_text(
+            "# Tasks\n\n## Now\n\n" + evidence + "\n## Stage 1\n", encoding="utf-8")
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+        context = self.context()
+        self.assertLessEqual(len(context), hooks.MAX_CONTEXT_CHARS)
+        self.assertIn("The Now section has", context)
+        self.assertIn("uncommitted changes in", context)
+        self.assertIn("Evidence 0:", context)
+        self.assertIn("(cut here", context)
+
     def test_silent_without_tasks(self):
         os.remove(self.root / "docs" / "TASKS.md")
         self.assertIsNone(run_hook("session-start", {"cwd": str(self.root)}))
