@@ -3,7 +3,15 @@
 # operating-system sandbox stops writes outside the project folder.
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
+# Every request resends the whole conversation, so compact it before it grows past this
+# many tokens; docs/TASKS.md keeps where work stands.
+model_auto_compact_token_limit = 200000
 
 [sandbox_workspace_write]
 # Package installs and documentation lookups need the network.
 network_access = true
+
+[agents]
+# At most four agents at once, the main one included, and no subagents of subagents.
+max_concurrent_threads_per_session = 4
+max_depth = 1

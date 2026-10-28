@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -50,6 +51,14 @@ class SetupProject(unittest.TestCase):
         self.assertIn('language = "ru"', config)
         self.assertIn("created  git repository", output)
         self.assertIn("set up project", git_log(self.root))
+
+    def test_codex_compacts_early_and_limits_subagents(self):
+        setup(self.root)
+        codex = tomllib.loads((self.root / ".codex/config.toml").read_text(encoding="utf-8"))
+        self.assertEqual(codex["sandbox_mode"], "workspace-write")
+        self.assertLessEqual(codex["model_auto_compact_token_limit"], 250000)
+        self.assertEqual(codex["agents"], {"max_concurrent_threads_per_session": 4,
+                                           "max_depth": 1})
 
     def test_existing_files_are_kept(self):
         self.root.mkdir(parents=True)
