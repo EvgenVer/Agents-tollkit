@@ -24,7 +24,7 @@ Each project ends up with:
 ```text
 AGENTS.md, CLAUDE.md     rules for the agents (CLAUDE.md just imports AGENTS.md)
 .claude/settings.json    plugin and secret-file rules for Claude Code
-.codex/config.toml       sandbox settings for Codex
+.codex/config.toml       sandbox, context and subagent limits for Codex
 zensical.toml            documentation site settings
 docs/                    PRODUCT, ARCHITECTURE, decisions/, components/, flows/, data,
                          operations, glossary, TASKS (with Now: where work stopped),
@@ -91,7 +91,7 @@ The agent works without asking for each step. What stops it is deterministic:
 | Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project. On Windows it works only after the sandbox setup below | not set up by studio; Antigravity's own permission settings apply |
 | Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same | the same |
 | Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects) | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked | denied with an explanation as in Codex, because Antigravity shows no prompt when a hook asks; the agent's own folders under `~/.gemini` stay readable and its plan artifacts writable |
-| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md, empty project commands; before stopping: record evidence for work changed or committed in the session, update Now, check pages that mention changed or deleted files | the same | the same; before stopping, the agent is sent back once per turn |
+| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md or Now, empty project commands; before stopping, each reminder once per session: record evidence for work changed or committed in the session, update Now, check pages that mention changed or deleted files | the same; subagents are not sent back | the same; before stopping, the agent is sent back once per turn |
 
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
 cannot see. Commit often, and keep backups of important folders outside your projects.
@@ -118,6 +118,24 @@ outside it and asks you first; allow those commands permanently when it offers.
 5. Read the documentation site: the agent starts it at `http://localhost:8000`, or run
    `.venv\Scripts\zensical serve` yourself (`.venv/bin/zensical serve` on macOS/Linux).
 
+## Keep Codex within its limits
+
+Codex resends the whole conversation with every request, so a long session uses up limits
+fast. The project's `.codex/config.toml` compacts the conversation at 200,000 tokens and
+runs at most four agents at once, with no subagents of subagents. Start a new session for
+each stage, since `docs/TASKS.md` keeps where work stands, and choose medium reasoning
+effort in `/model` for routine building. A project set up with an earlier version gets
+these settings when you add them to its `.codex/config.toml`, the first line above the
+first `[table]`:
+
+```toml
+model_auto_compact_token_limit = 200000
+
+[agents]
+max_concurrent_threads_per_session = 4
+max_depth = 1
+```
+
 ## Move an existing project to this version
 
 Install the plugin, open the project in Claude Code, Codex or Antigravity and paste the
@@ -133,9 +151,8 @@ each git command it runs outside its sandbox; allow them.
 >    keeps out secrets, local environments, generated files and large data, check with
 >    `git status` that none of them is listed, and commit the project as it is. If there
 >    are uncommitted changes, stop and ask me what to do with them. The current branch
->    is the base. Run the project's tests, if it has any, and note the result. Create
->    the branch `studio-migration` from the base and do steps 2-7 there, committing as
->    you go.
+>    is the base. Create the branch `studio-migration` from the base and do steps 2-7
+>    there, committing as you go.
 > 2. Rename AGENTS.md, CLAUDE.md, .claude/settings.json and .codex/config.toml, those
 >    that exist, by adding `.old` to the name. Then run the setup script of the studio
 >    `idea` skill as the skill describes: it creates these files fresh from its
@@ -191,8 +208,9 @@ each git command it runs outside its sandbox; allow them.
 >      with their evidence, and Now shows the current position.
 >    - The documentation site builds without errors, and every embedded code snippet
 >      points to an existing file.
->    - Every command in Project commands runs, and the tests give the same result as in
->      step 1.
+>    - The quick commands in Project commands run: install, lint, the docs build. Only
+>      if step 4 added markers to code, also run the fast tests, without end-to-end,
+>      paid or long-running ones; a test that fails must fail on the base branch too.
 > 8. Only when every check passes, merge `studio-migration` into the base branch, so
 >    the base holds only the new version, and delete `studio-migration`. If a check
 >    still fails or the merge conflicts, do not merge: leave both branches as they are.
