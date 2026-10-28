@@ -15,7 +15,8 @@ that they understand how their product is built and why.
    Read existing code and documents if there are any.
 2. Check facts you are not sure about in official documentation: current versions,
    maintenance status, hosting options and prices, platform and store rules. Hand
-   independent research questions to subagents in parallel.
+   independent research questions to subagents with a fresh context, at most three at a
+   time.
 
 ## Technical interview
 

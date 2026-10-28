@@ -74,8 +74,12 @@ first. When it changes the architecture or the stack, go back to the `design` sk
 - Keep dependencies inside the project: Python in `.venv`, JavaScript through the
   project's package manager; never install globally. Before adding a package, check
   that it exists and is maintained.
-- Use subagents for broad research, for independent tasks that touch different files,
-  and for fresh reviews. You stay responsible for the plan, `docs/TASKS.md` and the result.
+- Use a subagent only for broad research, a fresh review or an independent task in other
+  files, and run at most three at a time. Start it with a fresh context and a
+  self-contained brief: the goal, the files, what done looks like (in Codex,
+  `fork_turns: "none"`). Ask for a short report. A subagent does only its brief: it does
+  not edit `docs/TASKS.md`, commit, or start subagents of its own. You stay responsible
+  for the plan, `docs/TASKS.md` and the result.
 
 ## Technical debt
 
