@@ -57,7 +57,7 @@ def set_mtime(path, offset):
 
 def forget_start(test, session, root):
     """Remove, once the test ends, the note session start keeps in the temp folder."""
-    note = hooks.start_file(session, hooks.git_toplevel(root))
+    note = hooks.session_file(session, hooks.git_toplevel(root))
     test.addCleanup(note.unlink, missing_ok=True)
 
 
@@ -367,8 +367,12 @@ class Stop(ProjectCase):
         self.commit("change")
         self.assertIsNone(self.stop())  # without the session the commit is not seen
         self.assertIn("committed in this session", self.stop(session_id=session)["reason"])
+        self.assertIsNone(self.stop(session_id=session))  # each reminder is given once
         self.start(session)  # a resumed session keeps the commit it started from
-        self.assertIn("committed in this session", self.stop(session_id=session)["reason"])
+        (self.root / "util.py").write_text("x = 1\n", encoding="utf-8")
+        git(self.root, "add", "util.py")
+        self.commit("add util")  # a new commit is mentioned, counted from the start
+        self.assertIn("2 file(s) were committed", self.stop(session_id=session)["reason"])
         with open(self.root / "docs" / "TASKS.md", "a", encoding="utf-8") as tasks:
             tasks.write("- [x] T2 Save a book — check: click save — done\n")
         self.commit("record")
@@ -400,6 +404,59 @@ class Stop(ProjectCase):
         set_mtime(page, 20)
         self.commit("update the page")
         self.assertIsNone(self.stop(session_id=session))
+
+    def test_a_session_hears_each_reminder_once(self):
+        page = self.root / "docs" / "components" / "app.md"
+        page.parent.mkdir()
+        page.write_text("`app.py` uses `util.py`.\n", encoding="utf-8")
+        (self.root / "util.py").write_text("x = 1\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        self.commit("docs")
+        session = str(uuid.uuid4())
+        self.start(session)
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+        set_mtime(self.root / "app.py", 5)
+        reason = self.stop(session_id=session)["reason"]
+        self.assertIn("newer than docs/TASKS.md", reason)
+        self.assertIn("docs/components/app.md (app.py)", reason)
+        self.assertIsNone(self.stop(session_id=session))
+        self.assertEqual(self.stop()["decision"], "block")  # without a session id, always
+        (self.root / "util.py").write_text("x = 2\n", encoding="utf-8")
+        set_mtime(self.root / "util.py", 10)
+        reason = self.stop(session_id=session)["reason"]
+        self.assertIn("newer than docs/TASKS.md", reason)  # a newer change is new news
+        self.assertIn("docs/components/app.md (util.py)", reason)
+
+    def test_untracked_files_in_hidden_folders_are_not_work(self):
+        artifact = self.root / ".artifacts" / "run-1" / "result.json"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("{}\n", encoding="utf-8")
+        set_mtime(artifact, 5)
+        self.assertIsNone(self.stop())
+        (self.root / "notes.md").write_text("draft\n", encoding="utf-8")
+        set_mtime(self.root / "notes.md", 5)
+        self.assertIn("1 changed file(s)", self.stop()["reason"])
+
+    def transcript(self, meta):
+        path = Path(self.tmp.name) / f"rollout-{uuid.uuid4()}.jsonl"
+        lines = [{"type": "session_meta", "payload": meta}, {"type": "turn_context"}]
+        path.write_text("".join(json.dumps(line) + "\n" for line in lines), encoding="utf-8")
+        return str(path)
+
+    def test_codex_subagents_leave_the_records_to_the_main_agent(self):
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
+        set_mtime(self.root / "app.py", 5)
+        subagent = self.transcript({"thread_source": "subagent",
+                                    "source": {"subagent": {"thread_spawn": {"depth": 1}}}})
+        main = self.transcript({"thread_source": "user", "source": "vscode"})
+        for extra in [{"transcript_path": subagent}, {"agent_id": "a1"},
+                      {"transcript_path": self.transcript({"source": {"subagent": {}}})}]:
+            self.assertIsNone(run_hook("stop", {"cwd": str(self.root), **extra},
+                                       "--host", "codex"), extra)
+        self.assertEqual(self.stop(transcript_path=main)["decision"], "block")
+        claude = Path(self.tmp.name) / "claude.jsonl"
+        claude.write_text('{"type": "user", "message": {}}\n', encoding="utf-8")
+        self.assertEqual(self.stop(transcript_path=str(claude))["decision"], "block")
 
     def test_pages_about_uncommitted_deletions_must_be_checked(self):
         page = self.root / "docs" / "components" / "app.md"
@@ -559,8 +616,11 @@ class Antigravity(ProjectCase):
         set_mtime(self.root / "app.py", 5)
         self.assertEqual(stop(0), "continue")
         self.assertEqual(stop(1), "stop")  # the run that was sent back may stop
-        self.assertEqual(stop(2), "continue")  # the next turn is checked again
-        self.assertEqual(stop(4, "USER_CANCELED"), "stop")
+        self.assertEqual(stop(2), "stop")  # the same reminder is not repeated
+        (self.root / "app.py").write_text("print('again')\n", encoding="utf-8")
+        set_mtime(self.root / "app.py", 10)
+        self.assertEqual(stop(3), "continue")  # a newer change is checked again
+        self.assertEqual(stop(5, "USER_CANCELED"), "stop")
 
     def test_stop_sees_work_committed_in_the_conversation(self):
         run_hook("session-start", self.payload("app", "SessionStart"), "--host", "antigravity")

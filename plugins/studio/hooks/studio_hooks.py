@@ -73,7 +73,8 @@ CD_COMMANDS = {"cd", "chdir", "sl", "set-location", "pushd", "push-location"}
 POP_COMMANDS = {"popd", "pop-location"}
 
 SETUP_ONLY = {".git", ".claude", ".codex", ".agents", ".vscode", ".idea"}
-# The commit each session started from, so stop also sees work committed since then.
+# Per session: the commit it started from, so stop also sees work committed since then,
+# and the reminders stop already gave, so it does not repeat them.
 SESSIONS = Path(tempfile.gettempdir()) / "studio-hooks" / "sessions"
 SESSION_DAYS = 30
 # Pages that may name deleted files: the work log, finished stages and past decisions.
@@ -164,8 +165,9 @@ def project_root(cwd):
 
 
 def uncommitted(top):
-    """(changed, removed) absolute paths of uncommitted changes, untracked files included;
-    removed holds deleted files and the old paths of renamed ones."""
+    """(changed, removed) absolute paths of uncommitted changes, untracked files included
+    except those in hidden folders such as .artifacts/ or .cache/; removed holds deleted
+    files and the old paths of renamed ones."""
     output = run_git(top, "status", "--porcelain", "-z", "-uall")
     entries = output.split("\0") if output else []
     changed, removed = [], []
@@ -179,6 +181,9 @@ def uncommitted(top):
             if entry[0] == "R" and index < len(entries):
                 removed.append(top / entries[index])
             index += 1  # a rename or copy is followed by its original path
+        hidden = any(part.startswith(".") for part in Path(entry[3:]).parts[:-1])
+        if entry[:2] == "??" and hidden:
+            continue  # generated output, caches and tool state, not the agent's work
         (removed if "D" in entry[:2] else changed).append(top / entry[3:])
     return changed, removed
 
@@ -203,33 +208,39 @@ def session_id(payload):
     return str(payload.get("session_id") or payload.get("conversationId") or "")
 
 
-def start_file(session, top):
+def session_file(session, top):
     digest = hashlib.sha1(f"{session}|{top}".encode("utf-8")).hexdigest()[:20]
     return SESSIONS / f"{digest}.json"
+
+
+def load_session(session, top):
+    try:
+        notes = json.loads(session_file(session, top).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return notes if isinstance(notes, dict) else {}
+
+
+def save_session(session, top, notes):
+    try:
+        SESSIONS.mkdir(parents=True, exist_ok=True)
+        for old in SESSIONS.glob("*.json"):
+            if old.stat().st_mtime < time.time() - SESSION_DAYS * 86400:
+                old.unlink()
+        session_file(session, top).write_text(json.dumps(notes), encoding="utf-8")
+    except OSError:
+        pass  # without notes, stop checks uncommitted work only and may repeat itself
 
 
 def remember_start(payload):
     """Note the commit this session starts from; a resumed session keeps its first one."""
     session, top = session_id(payload), git_toplevel(payload.get("cwd") or os.getcwd())
     head = run_git(top, "rev-parse", "--verify", "HEAD") if session and top else None
-    path = start_file(session, top) if head else None
-    if not path or path.exists():
+    if not head:
         return
-    try:
-        SESSIONS.mkdir(parents=True, exist_ok=True)
-        for old in SESSIONS.glob("*.json"):
-            if old.stat().st_mtime < time.time() - SESSION_DAYS * 86400:
-                old.unlink()
-        path.write_text(json.dumps({"head": head.strip()}), encoding="utf-8")
-    except OSError:
-        pass  # without the note, stop checks uncommitted work only
-
-
-def start_commit(session, top):
-    try:
-        return json.loads(start_file(session, top).read_text(encoding="utf-8"))["head"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
+    notes = load_session(session, top)
+    if "head" not in notes:
+        save_session(session, top, {**notes, "head": head.strip()})
 
 
 def section(text, title):
@@ -674,12 +685,23 @@ def doc_pages(root, skip):
 
 
 def page_hits(root, pages, mentioned):
-    """'page (file, ...)' for each page that mentions one of the files `mentioned` picks."""
+    """(page, files) for each page that mentions one of the files `mentioned` picks."""
     found = []
     for page in pages:
         hits = mentioned(page, read_text(page))
         if hits:
-            found.append(f"{page.relative_to(root.resolve()).as_posix()} ({', '.join(hits[:3])})")
+            found.append((page.relative_to(root.resolve()).as_posix(), hits))
+    return found
+
+
+def untold(hits, told):
+    """'page (file, ...)' for the page and file pairs not mentioned yet; notes them."""
+    found = []
+    for page, files in hits:
+        new = [name for name in files if f"{page}|{name}" not in told]
+        told.update(f"{page}|{name}" for name in new)
+        if new:
+            found.append(f"{page} ({', '.join(new[:3])})")
     return found
 
 
@@ -704,52 +726,82 @@ def pages_about_removed(root, removed):
 
 
 def stop_reason(cwd, session=""):
-    """Why the agent should not stop yet, or None."""
+    """Why the agent should not stop yet, or None. With a session id each reminder is
+    given once: a later stop mentions only what changed since."""
     root = project_root(cwd)
     tasks = root / TASKS
     top = git_toplevel(root)
     if not tasks.is_file() or not top:
         return None
     tasks = tasks.resolve()
+    notes = load_session(session, top) if session else {}
+    told = set(notes.get("told", []))
     changed, removed = uncommitted(top)
-    since = start_commit(session, top) if session else None
+    since = notes.get("head")
     committed, committed_removed = committed_since(top, since) if since else ([], [])
     reasons = []
     pending = [p for p in changed + removed if p.resolve() != tasks]
-    times = [p.stat().st_mtime for p in pending if p.exists()]
-    if times and tasks.stat().st_mtime < max(times):
-        reasons.append(
-            f"{len(pending)} changed file(s) are newer than docs/TASKS.md. If the work is "
-            "verified, record the evidence there and commit it. If it is unfinished or you "
-            "are waiting for the owner, update the Now section with the next step. If the "
-            "changes are generated files, add them to .gitignore.")
+    newest = max((p.stat().st_mtime for p in pending if p.exists()), default=0)
+    head = (run_git(top, "rev-parse", "HEAD") or "").strip()
+    if newest > tasks.stat().st_mtime:
+        if newest > notes.get("tasks_told", 0):
+            notes["tasks_told"] = newest
+            reasons.append(
+                f"{len(pending)} changed file(s) are newer than docs/TASKS.md. If the work "
+                "is verified, record the evidence there and commit it. If it is unfinished "
+                "or you are waiting for the owner, update the Now section with the next "
+                "step. If the changes are generated files, add them to .gitignore.")
     elif (committed or committed_removed) and tasks not in {
             p.resolve() for p in committed + changed}:
-        reasons.append(
-            f"{len(committed + committed_removed)} file(s) were committed in this session, "
-            "but docs/TASKS.md was not updated. Record the evidence of the finished work "
-            "there, or update the Now section with the next step, and commit it.")
-    pages = stale_pages(root, changed + committed)
+        if notes.get("commits_told") != head:
+            notes["commits_told"] = head
+            reasons.append(
+                f"{len(committed + committed_removed)} file(s) were committed in this "
+                "session, but docs/TASKS.md was not updated. Record the evidence of the "
+                "finished work there, or update the Now section with the next step, and "
+                "commit it.")
+    pages = untold(stale_pages(root, changed + committed), told)
     if pages:
         reasons.append(
             "These documentation pages mention files you changed after the page was last "
             f"edited: {'; '.join(pages[:5])}. Check that they still describe the code, and "
             "update them if they do not.")
-    gone = pages_about_removed(root, removed + committed_removed)
+    gone = untold(pages_about_removed(root, removed + committed_removed), told)
     if gone:
         reasons.append(
             "These documentation pages mention files that were deleted or renamed: "
             f"{'; '.join(gone[:5])}. Point them to the current files, or remove what no "
             "longer exists.")
+    if session and reasons:
+        save_session(session, top, {**notes, "told": sorted(told)})
     return "Before you stop: " + " ".join(reasons) if reasons else None
+
+
+def is_subagent(payload):
+    """True when a Codex subagent stops. Codex runs Stop in subagent threads too; their
+    transcript starts with a session_meta record that names a subagent as the source.
+    Claude Code runs Stop for the main agent only."""
+    if payload.get("agent_id"):
+        return True
+    try:
+        with open(payload.get("transcript_path") or "", encoding="utf-8") as transcript:
+            first = json.loads(transcript.readline() or "{}")
+    except (OSError, ValueError):
+        return False
+    meta = first.get("payload") if isinstance(first, dict) else None
+    if first.get("type") != "session_meta" or not isinstance(meta, dict):
+        return False
+    source = meta.get("source")
+    return meta.get("thread_source") == "subagent" or (
+        isinstance(source, dict) and "subagent" in source)
 
 
 def stop(payload, host="claude"):
     if host == "antigravity":
         antigravity_stop(payload)
         return
-    if payload.get("stop_hook_active"):
-        return
+    if payload.get("stop_hook_active") or is_subagent(payload):
+        return  # the main agent keeps the records; a subagent only does its brief
     reason = stop_reason(payload.get("cwd"), session_id(payload))
     if reason:
         emit({"decision": "block", "reason": reason})
