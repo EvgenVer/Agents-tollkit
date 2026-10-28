@@ -69,6 +69,8 @@ first. When it changes the architecture or the stack, go back to the `design` sk
   test message, launch the desktop app, run the mobile app in an emulator.
 - A task is done only when the checks in `Project commands` pass and its evidence is
   recorded in `docs/TASKS.md`. Never weaken tests; never report a check you did not run.
+- If the same check fails three times, or an experiment has no clear pass criterion,
+  stop and bring the owner options with their cost instead of trying again.
 - Commit after each verified task. Ask the owner before pushing, force-pushing or
   rewriting history.
 - Keep dependencies inside the project: Python in `.venv`, JavaScript through the
@@ -91,9 +93,11 @@ on critical paths, outdated or vulnerable dependencies. Record the findings unde
 ## Long sessions
 
 `docs/TASKS.md` is your memory across sessions, context compaction and tools; Claude
-Code, Codex and Antigravity all read it. Keep `Now` current when you finish a task and before you
-stop. When a stage is done, move its tasks to `docs/history/stage-<N>.md` and leave one
-summary line, so the file stays short.
+Code, Codex and Antigravity all read it. Keep `Now` current when you finish a task and
+before you stop, and keep it to about ten lines: where work stopped, the next step, what
+waits for the owner. Evidence goes to `docs/history/` or linked files. When a stage is
+done, move its tasks to `docs/history/stage-<N>.md` and leave one summary line, so the
+file stays short.
 
 ## Keeping the owner informed
 
