@@ -94,7 +94,9 @@ The agent works without asking for each step. What stops it is deterministic:
 | Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md or Now, empty project commands; before stopping, each reminder once per session: record evidence for work changed or committed in the session, update Now, check pages that mention changed or deleted files | the same; subagents are not sent back | the same; before stopping, the agent is sent back once per turn |
 
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
-cannot see. Commit often, and keep backups of important folders outside your projects.
+cannot see. Quoted text and the scripts and messages passed in here-documents count as
+text: a `>` there is no redirect, and such a script is denied only when it names a secret
+file that exists. Commit often, and keep backups of important folders outside your projects.
 
 In Antigravity a hook that fails would block every tool, so the studio hooks let the
 action through when they fail, and they do nothing at all when `python` is missing from

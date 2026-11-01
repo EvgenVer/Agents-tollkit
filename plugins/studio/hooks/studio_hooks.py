@@ -64,6 +64,33 @@ SWITCHES = POWERSHELL_FLAGS | {"-append", "-nonewline", "-noclobber", "-passthru
 NULL_TARGETS = {"/dev/null", "$null", "nul", "&1", "&2"}
 REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(\"[^\"]+\"|'[^']+'|[^\s;|&<>]+)")
 QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+TOKEN = re.compile(r"[^\s'\"`;|&<>()=,]+")
+# Here-documents (<<EOF ... EOF) and PowerShell here-strings (@' ... '@) carry text or a
+# script for another program; only a shell reading them runs them as commands.
+HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w.-]*)\2[^\n]*\n")
+HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.DOTALL)
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd", "iex",
+          "invoke-expression"}
+# Quoted text with these characters is a search pattern, not a file name.
+PATTERN_LIKE = re.compile(r"[|()^\[]")
+# Search commands and their options that take a value, so the pattern can be told apart
+# from the files searched. Select-String options are matched in lower case.
+_GREP_VALUES = {"-A", "-B", "-C", "-m", "--max-count", "-d", "--directories", "-D",
+                "--devices", "-f", "--file", "--include", "--exclude", "--exclude-dir",
+                "--label"}
+SEARCH_VALUE_OPTIONS = {
+    "rg": {"-g", "--glob", "--iglob", "-t", "--type", "-T", "--type-not", "-m",
+           "--max-count", "-A", "-B", "-C", "--context", "--max-depth", "-d", "-f", "--file",
+           "-r", "--replace", "-j", "--threads", "-M", "--max-columns", "-E", "--encoding",
+           "--max-filesize", "--sort", "--sortr"},
+    "grep": _GREP_VALUES, "egrep": _GREP_VALUES, "fgrep": _GREP_VALUES, "findstr": set(),
+    "select-string": {"-path", "-literalpath", "-encoding", "-include", "-exclude",
+                      "-context", "-culture"},
+}
+SEARCH_VALUE_OPTIONS["sls"] = SEARCH_VALUE_OPTIONS["select-string"]
+PATTERN_OPTIONS = {"-e", "--regexp", "-pattern"}
+# Commands that only tell whether a file exists, which reveals nothing inside it.
+EXISTENCE_CHECKS = {"test-path", "test", "["}
 # Options git takes before its subcommand (git -C dir, -c key=value, --no-pager, ...).
 ARGUMENT = r"(?:\"[^\"]*\"|'[^']*'|[^\s;|&]+)"
 GIT_OPTION = (rf"(?:-[Cc]\s+{ARGUMENT}|--(?:git-dir|work-tree|namespace)\s+{ARGUMENT}"
@@ -401,7 +428,80 @@ def outside_project(path, root, payload, writing):
 
 
 def command_segments(command):
-    return [part.strip() for part in re.split(r"&&|\|\||[;|\n]", command) if part.strip()]
+    """The parts of a command line between ;, |, &&, || and line breaks outside quotes.
+    With unbalanced quotes, such as an apostrophe in plain text, split everywhere."""
+    parts, current, quote, index = [], [], None, 0
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == quote:
+                quote = None
+            elif quote == '"' and char in "\\`" and index + 1 < len(command):
+                current.append(char)  # an escaped character inside double quotes
+                index += 1
+                char = command[index]
+        elif char in "'\"":
+            quote = char
+        elif command.startswith(("&&", "||"), index) or char in ";|\n":
+            parts.append("".join(current))
+            current = []
+            index += 2 if command.startswith(("&&", "||"), index) else 1
+            continue
+        current.append(char)
+        index += 1
+    if quote:
+        return [part.strip() for part in re.split(r"&&|\|\||[;|\n]", command) if part.strip()]
+    parts.append("".join(current))
+    return [part.strip() for part in parts if part.strip()]
+
+
+def program_name(text):
+    """The program the last command in this text runs, in lower case."""
+    words = command_words(re.split(r"&&|\|\||[;|]", text)[-1])
+    return Path(words[0].lstrip("&").strip("'\"")).stem.lower() if words else ""
+
+
+def split_documents(command):
+    """The command without the bodies of its here-documents and here-strings, and those
+    bodies with the program that reads each. A body a shell reads stays in the command."""
+    documents = []
+
+    def here_string(match):
+        after = re.match(r"\s*\|\s*([^\n]*)", match.string[match.end():])
+        reader = program_name(after.group(1)) if after else ""
+        if reader in SHELLS:
+            return match.group()
+        documents.append((match.group(2), reader))
+        return "@''@"
+
+    command = HERE_STRING.sub(here_string, command)
+    parts, position = [], 0
+    while True:
+        match = HEREDOC.search(command, position)
+        if not match:
+            parts.append(command[position:])
+            break
+        indent = r"\t*" if match.group(1) else ""
+        closing = re.compile(rf"^{indent}{re.escape(match.group(3))}[ \t]*\r?$", re.MULTILINE)
+        end = closing.search(command, match.end())
+        body_end, after = (end.start(), end.end()) if end else (len(command), len(command))
+        line_start = command.rfind("\n", 0, match.start()) + 1
+        reader = program_name(command[line_start:match.start()])
+        if reader in SHELLS:
+            parts.append(command[position:after])
+        else:
+            parts.append(command[position:match.end()])
+            documents.append((command[match.end():body_end], reader))
+        position = after
+    return "".join(parts), documents
+
+
+def names_secret_file(text, cwd):
+    """True when the text names a secret file that exists, such as a script loading .env."""
+    for token in TOKEN.findall(text):
+        if is_secret_path(token) and exists(resolve_path(token, cwd)):
+            return True
+    return False
 
 
 def command_words(segment):
@@ -446,12 +546,43 @@ def exists(path):
         return False
 
 
+def search_pattern(words):
+    """The pattern a search command (rg, grep, Select-String) looks for, else None. It is
+    text to find, not a file the command reads."""
+    name = Path(words[0]).stem.lower() if words else ""
+    if name not in SEARCH_VALUE_OPTIONS:
+        return None
+    values = SEARCH_VALUE_OPTIONS[name]
+    lower = name in {"select-string", "sls"}
+    args = words[1:]
+    for index, word in enumerate(args[:-1]):
+        if word.lower() in PATTERN_OPTIONS:
+            return args[index + 1]
+    index = 0
+    while index < len(args):
+        word = args[index]
+        option = word.lower() if lower else word
+        if word.startswith("-") or (name == "findstr" and word.startswith("/")):
+            index += 2 if option in values else 1
+            continue
+        return word
+    return None
+
+
 def secret_in_segment(segment, cwd):
     words = command_words(segment)
-    if (len(words) == 3 and words[0].lower() in {"cp", "copy", "copy-item"}
+    name = words[0].lower() if words else ""
+    if name in EXISTENCE_CHECKS:
+        return False  # it only tells whether the file exists
+    if (len(words) == 3 and name in {"cp", "copy", "copy-item"}
             and SAFE_SUFFIX.search(words[1]) and is_secret_path(words[2])):
         return False  # copying .env.example into place creates a file without reading one
-    tokens = re.findall(r"[^\s'\"`;|&<>()=,]+", strip_prose(segment))
+    text = QUOTED.sub(lambda match: " " if PATTERN_LIKE.search(match.group()) else match.group(),
+                      strip_prose(segment))
+    tokens = TOKEN.findall(text)
+    pattern = search_pattern(words)
+    if pattern in tokens:
+        tokens.remove(pattern)
     if any(is_secret_path(token) for token in tokens):
         return True
     # Quoted text with spaces is a path, not prose, when it names a secret file that exists.
@@ -511,8 +642,12 @@ def deletion_risk(segment, cwd, root, payload):
 
 
 def write_targets(segment):
-    """Destinations a shell segment writes to: copies, moves, file writers, redirects."""
-    targets = [match.strip("'\"") for match in REDIRECT.findall(segment)]
+    """Destinations a shell segment writes to: copies, moves, file writers, redirects.
+    A > inside quoted text, such as an e-mail address in a commit message, is text."""
+    unquoted = QUOTED.sub(
+        lambda match: match.group() if re.search(r">\s*$", segment[:match.start()]) else "''",
+        segment)
+    targets = [match.strip("'\"") for match in REDIRECT.findall(unquoted)]
     words = command_words(segment)
     name = Path(words[0]).stem.lower() if words else ""
     if name in COPY_COMMANDS or name in WRITE_COMMANDS:
@@ -538,10 +673,21 @@ def write_targets(segment):
     return [t for t in targets if t.lower() not in NULL_TARGETS and not t.startswith(("$", "%"))]
 
 
+def environment_python(program):
+    """True for the Python or pip of a virtual environment: a relative .../Scripts/python
+    or .../bin/python, or an absolute one next to the environment's pyvenv.cfg."""
+    if not re.search(r"[\\/](scripts|bin)[\\/](python|pip)[\d.]*(\.exe)?$", program, re.I):
+        return False
+    path = Path(native_path(program))
+    absolute = path.is_absolute() or str(program).startswith(("/", "\\"))
+    return not absolute or exists(path.parent.parent / "pyvenv.cfg")
+
+
 def global_install(segment, venv_active):
-    words = [w.lower() for w in command_words(strip_prose(segment))]
-    if words and words[0] == "sudo":
-        words = words[1:]
+    original = command_words(strip_prose(segment))
+    if original and original[0] == "sudo":
+        original = original[1:]
+    words = [w.lower() for w in original]
     if not words:
         return False
     tool, rest = Path(words[0]).stem, words[1:]
@@ -565,7 +711,8 @@ def global_install(segment, venv_active):
         return False
     if "--user" in options:
         return True
-    in_venv = venv_active or re.search(r"(^|[\\/])\.?venv[\\/]", words[0])
+    in_venv = (venv_active or re.search(r"(^|[\\/])\.?venv[\\/]", words[0])
+               or environment_python(original[0]))
     explicit_target = bool(options & {"--target", "-t", "--prefix"})
     return not (in_venv or explicit_target)
 
@@ -590,8 +737,13 @@ def segment_decision(segment, cwd, root, payload, venv_active):
 
 
 def shell_decision(command, cwd, root, payload):
+    command, documents = split_documents(command)
     located = located_segments(command, cwd)
     if any(secret_in_segment(segment, where) for segment, where in located):
+        return DENY, SECRET_REASON
+    # A script given to Python or another program may open a secret file it names; the
+    # text of a commit message only mentions one.
+    if any(reader != "git" and names_secret_file(body, cwd) for body, reader in documents):
         return DENY, SECRET_REASON
     results, venv_active = [], False
     for segment, where in located:

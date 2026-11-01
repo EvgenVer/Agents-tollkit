@@ -128,6 +128,29 @@ class Secrets(ProjectCase):
         self.assertDecision(None, "Bash", ['git commit -m "drop old config/.env"',
                                            'git commit -m "rotate server.key"'])
 
+    def test_search_patterns_and_existence_checks_read_nothing(self):
+        (self.root / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+        self.assertDecision(None, "Bash", [
+            r"rg -n 'secret|\.env' src", r'rg -n "\.env" app', "grep -rn .env src",
+            r"rg -C 2 -e '\.env' app", "test -f .env"])
+        self.assertDecision(None, "PowerShell", [
+            "Select-String -Pattern '.env' -Path app.py", "Test-Path -LiteralPath .env",
+            r"$staged | Where-Object { $_ -match '(^|/)(\.env($|\.)|credentials)' }"])
+        # The files a search reads are still checked.
+        self.assertDecision("deny", "Bash", ["rg TOKEN .env", "rg -c TOKEN .env",
+                                             "grep -f .env app.py", "grep -rn TOKEN .env"])
+        self.assertDecision("deny", "PowerShell", ["Select-String -Path .env -Pattern TOKEN"])
+
+    def test_scripts_that_open_a_secret_file_are_denied(self):
+        (self.root / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+        self.assertDecision("deny", "Bash", [
+            "python - <<'EOF'\nfrom pathlib import Path\nprint(Path('.env').read_text())\nEOF"])
+        self.assertDecision("deny", "PowerShell", ["@'\nprint(open('.env').read())\n'@ | python -"])
+        # A word that only looks like a secret file, and a commit message, read nothing.
+        self.assertDecision(None, "Bash", [
+            "python - <<'EOF'\nnote = 'the ledger keeps no credentials; 5 runs'\nEOF",
+            "git commit -F - <<'EOF'\nKeep .env out of git\nEOF"])
+
 
 class Git(ProjectCase):
     def test_destructive_git_is_denied(self):
@@ -144,7 +167,11 @@ class Git(ProjectCase):
             'codex exec -C "proj" "Then run git push origin main and report"'])
 
     def test_push_needs_the_owner(self):
-        self.assertDecision("ask", "Bash", ["git push origin main", "git add . && git push"])
+        self.assertDecision("ask", "Bash", ["git push origin main", "git add . && git push",
+                                            "bash <<'EOF'\ngit push\nEOF"])
+        # Text that only mentions a push, even after a semicolon inside the quotes.
+        self.assertDecision(None, "Bash", ['git commit -m "fix it; then git push later"',
+                                           "python - <<'EOF'\nprint('git push')\nEOF"])
 
     def test_options_before_the_git_command(self):
         self.assertDecision("deny", "Bash", [
@@ -210,6 +237,21 @@ class OutsideFiles(ProjectCase):
         patch = "*** Begin Patch\n*** Add File: src/new.py\n+x = 1\n*** End Patch"
         self.assertIsNone(self.decision("apply_patch", command=patch))
 
+    def test_a_greater_than_sign_in_text_is_not_a_redirect(self):
+        self.assertDecision(None, "Bash", [
+            "printf 'Fix it\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\n' > msg.txt",
+            'git commit -m "Fix it <noreply@anthropic.com>"',
+            "git commit -F - <<'EOF'\nFix it\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF",
+            "uv run python - <<'PYEOF'\nif len(modes) > 1:\n    pass\ndef f(x) -> R:\n"
+            "    return x\nPYEOF",
+            "cat > notes.md <<'EOF'\nThe log goes to `<Work>/<name>_01.txt`.\nEOF"])
+        self.assertDecision(None, "PowerShell", [
+            "@'\nif a > 1:\n    s = '<a id=\"x\"></a>'\n'@ | .\\.venv\\Scripts\\python.exe -"])
+        # Real redirects, also inside a here-document a shell runs, are still checked.
+        self.assertDecision("ask", "Bash", [
+            f"printf 'Fix it <a@b.c>' > {OUTSIDE}", f"cat > {OUTSIDE} <<'EOF'\nhi\nEOF",
+            f"bash <<'EOF'\necho hi > {OUTSIDE}\nEOF"])
+
     def test_a_change_of_folder_is_followed(self):
         documents = OUTSIDE.parent
         self.assertDecision("ask", "PowerShell", [
@@ -249,6 +291,16 @@ class Installs(ProjectCase):
             "source .venv/bin/activate && pip install httpx",
             'git commit -m "document npm install -g usage"'])
         self.assertDecision(None, "PowerShell", [".venv\\Scripts\\activate; pip install requests"])
+
+    def test_any_virtual_environment_counts(self):
+        self.assertDecision(None, "Bash", [
+            "python -m venv tlvenv && ./tlvenv/Scripts/python -m pip install -q comtypes",
+            "tools/bin/pip install httpx"])
+        python = self.root.parent / "py" / "Scripts" / "python.exe"
+        self.assertDecision("ask", "Bash", [f'"{python}" -m pip install httpx'])
+        (self.root.parent / "py" / "pyvenv.cfg").parent.mkdir(parents=True)
+        (self.root.parent / "py" / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+        self.assertDecision(None, "Bash", [f'"{python}" -m pip install httpx'])
 
 
 class GuardOutput(ProjectCase):
