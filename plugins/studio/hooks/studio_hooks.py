@@ -374,9 +374,12 @@ def is_secret_path(value):
 
 
 def native_path(value):
-    """Turn a Git Bash path such as /d/project into D:/project on Windows."""
+    """Turn a Git Bash path such as /d/project into D:/project on Windows, and /tmp into
+    the temporary folder, which is where Git Bash keeps it."""
     value = str(value).strip().strip("'\"")
-    if os.name == "nt" and re.match(r"^/[a-zA-Z](/|$)", value):
+    if os.name == "nt" and re.match(r"^/tmp(/|$)", value):
+        value = f"{tempfile.gettempdir()}{value[4:]}"
+    elif os.name == "nt" and re.match(r"^/[a-zA-Z](/|$)", value):
         value = f"{value[1].upper()}:/{value[3:]}"
     return value
 

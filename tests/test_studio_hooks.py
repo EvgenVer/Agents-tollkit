@@ -274,6 +274,17 @@ class OutsideFiles(ProjectCase):
         self.assertIsNone(self.decision("Grep", pattern="x"))
         self.assertIsNone(self.decision("Glob", pattern="**/*.py"))
 
+    @unittest.skipUnless(os.name == "nt", "Git Bash paths exist on Windows only")
+    def test_git_bash_tmp_is_the_temporary_folder(self):
+        self.assertDecision(None, "Bash", [
+            "python app.py > /tmp/out.txt", "cp app.py /tmp/copy.py", "rm -rf /tmp/scratch-x",
+            "cat app.py | tee /tmp/copy.py", "cd /tmp && echo hi > out.txt"])
+        for tool in ["Read", "Write"]:
+            self.assertIsNone(self.decision(tool, file_path="/tmp/out.txt"), tool)
+        # The temporary folder as a whole stays protected, and a similar name is not it.
+        self.assertDecision("deny", "Bash", ["rm -rf /tmp", "rm -rf /tmp/*"])
+        self.assertDecision("ask", "Bash", ["cp app.py /tmpfiles/copy.py"])
+
 
 class Installs(ProjectCase):
     def test_global_installs_need_the_owner(self):
