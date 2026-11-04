@@ -73,8 +73,13 @@ first. When it changes the architecture or the stack, go back to the `design` sk
   critical paths fully; do not write tests that only repeat the code.
 - Also check the way a user would: open the web app in a browser, send the bot a real
   test message, launch the desktop app, run the mobile app in an emulator.
-- A task is done only when the checks in `Project commands` pass and its evidence is
-  recorded in `docs/TASKS.md`. Never weaken tests; never report a check you did not run.
+- A task is done only when its checks pass and its evidence is recorded in
+  `docs/TASKS.md`. Run all of `Project commands` for each task, unless the tests take
+  more than ten minutes: then run the tests that cover the change, and all of them every
+  three or four tasks and at the end of the stage. Never weaken tests; never report a
+  check you did not run.
+- Tests and one-off scripts work on temporary data named explicitly, never on the real
+  database from the settings, and remove only what they created.
 - If the same check fails three times, or an experiment has no clear pass criterion,
   stop and bring the owner options with their cost instead of trying again.
 - Commit after each verified task. Ask the owner before pushing, force-pushing or
@@ -92,14 +97,17 @@ first. When it changes the architecture or the stack, go back to the `design` sk
   data model, security, money or how parts communicate, before you build on it; in a
   long stage, every three or four tasks; and each stage at its end. A fix that tests
   cover needs no new review; after fixing findings, ask the same reviewer to check just
-  the fixes.
+  the fixes. A review gets at most two such checks; after that, fix now only what would
+  lose data or break security, and move the rest to `Technical debt`.
 
 ## Technical debt
 
 Keep the code matching `docs/ARCHITECTURE.md`. At the end of each stage, have a fresh
 subagent review the stage against it: module boundaries, duplication, dead code, tests
-on critical paths, outdated or vulnerable dependencies. Record the findings under
-`Technical debt` in `docs/TASKS.md` with a priority, and plan the fixes before they grow.
+on critical paths, outdated or vulnerable dependencies. Fix small things as you find
+them. Record the findings, and larger risks found during the stage that do not block the
+current task, under `Technical debt` in `docs/TASKS.md` with a priority. Fix them before
+the stage is closed; keep one open only if the owner agrees.
 
 ## Long sessions
 
@@ -110,6 +118,14 @@ waits for the owner. Evidence goes to `docs/history/` or linked files. When a st
 done, move its tasks to `docs/history/stage-<N>.md` and leave one summary line, so the
 file stays short. Keep the context small: find code by search, read only the lines you
 need, and keep command output short (quiet test runs, the end of a log).
+
+Wait for a long command instead of checking on it: every check resends the whole
+conversation. In Claude Code run it in the background. In Codex the owner wants no
+progress updates while a command runs, which replaces the default of an update and a
+wait of at most 60 seconds: begin the `exec` call with the line
+`// @exec: {"yield_time_ms": 300000}`, loop on `write_stdin` with empty `chars` and
+`yield_time_ms: 300000`, print each call's `output` and the final `exit_code`, and if
+`exec` returns a running cell, `wait` on it with `yield_time_ms: 300000`.
 
 ## Keeping the owner informed
 

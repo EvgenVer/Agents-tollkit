@@ -127,9 +127,13 @@ Codex resends the whole conversation with every request, so a long session uses 
 fast. The project's `.codex/config.toml` compacts the conversation at 200,000 tokens and
 runs at most four agents at once, with no subagents of subagents. Start a new session for
 each stage, since `docs/TASKS.md` keeps where work stands, and choose medium reasoning
-effort in `/model` for routine building. A project set up with an earlier version gets
-these settings when you add them to its `.codex/config.toml`, the first line above the
-first `[table]`:
+effort in `/model` for routine building. The rules in `AGENTS.md` keep the rest down: the
+agent waits for a long command instead of checking on it, so it stays silent for up to
+five minutes at a time, runs only the tests that cover a change when the full run takes
+more than ten minutes, and asks for at most two checks of a review's fixes. A project set
+up with an earlier version gets these rules when you update its `AGENTS.md`, and these
+settings when you add them to its `.codex/config.toml`, the first line above the first
+`[table]`:
 
 ```toml
 model_auto_compact_token_limit = 200000
