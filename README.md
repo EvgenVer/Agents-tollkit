@@ -24,7 +24,7 @@ Each project ends up with:
 ```text
 AGENTS.md, CLAUDE.md     rules for the agents (CLAUDE.md just imports AGENTS.md)
 .claude/settings.json    plugin and secret-file rules for Claude Code
-.codex/config.toml       sandbox, context and subagent limits for Codex
+.codex/config.toml       sandbox, context and subagent limits, and rules for Codex alone
 zensical.toml            documentation site settings
 docs/                    PRODUCT, ARCHITECTURE, decisions/, components/, flows/, data,
                          operations, glossary, TASKS (with Now: where work stopped),
@@ -125,23 +125,19 @@ outside it and asks you first; allow those commands permanently when it offers.
 
 Codex resends the whole conversation with every request, so a long session uses up limits
 fast. The project's `.codex/config.toml` compacts the conversation at 200,000 tokens and
-runs at most four agents at once, with no subagents of subagents. Start a new session for
-each stage, since `docs/TASKS.md` keeps where work stands, and choose medium reasoning
-effort in `/model` for routine building. The rules in `AGENTS.md` keep the rest down: the
-agent waits for a long command instead of checking on it, so it stays silent for up to
-five minutes at a time, runs only the tests that cover a change when the full run takes
-more than ten minutes, and asks for at most two checks of a review's fixes. A project set
-up with an earlier version gets these rules when you update its `AGENTS.md`, and these
-settings when you add them to its `.codex/config.toml`, the first line above the first
-`[table]`:
+runs at most four agents at once, with no subagents of subagents. It also tells Codex to
+wait for a long command instead of checking on it, so the agent stays silent for up to
+five minutes at a time; these instructions reach only Codex, not Claude Code or
+Antigravity. Start a new session for each stage, since `docs/TASKS.md` keeps where work
+stands, and choose medium reasoning effort in `/model` for routine building. The rules in
+`AGENTS.md` keep the rest down: the agent runs only the tests that cover a change when the
+full run takes more than ten minutes, and asks for at most two checks of a review's fixes.
 
-```toml
-model_auto_compact_token_limit = 200000
-
-[agents]
-max_concurrent_threads_per_session = 4
-max_depth = 1
-```
+Codex applies `.codex/config.toml` only in a project you trust; elsewhere it ignores the
+file without saying so. A project set up with an earlier version gets these rules when you
+update its `AGENTS.md`, and these settings when you copy them from
+[the template](plugins/studio/skills/idea/project/codex-config.toml) to its
+`.codex/config.toml`, keeping the top-level ones above the first `[table]`.
 
 ## Move an existing project to this version
 

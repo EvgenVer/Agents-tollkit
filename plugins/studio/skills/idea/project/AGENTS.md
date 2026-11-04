@@ -89,10 +89,9 @@ first. When it changes the architecture or the stack, go back to the `design` sk
   that it exists and is maintained.
 - Use a subagent only for broad research, a fresh review or an independent task in other
   files, and run at most three at a time. Start it with a fresh context and a
-  self-contained brief: the goal, the files, what done looks like (in Codex,
-  `fork_turns: "none"`). Ask for a short report. A subagent does only its brief: it does
-  not edit `docs/TASKS.md`, commit, or start subagents of its own. You stay responsible
-  for the plan, `docs/TASKS.md` and the result.
+  self-contained brief: the goal, the files, what done looks like. Ask for a short report.
+  A subagent does only its brief: it does not edit `docs/TASKS.md`, commit, or start
+  subagents of its own. You stay responsible for the plan, `docs/TASKS.md` and the result.
 - Have a fresh subagent review code, not documents or plans: a task that changes the
   data model, security, money or how parts communicate, before you build on it; in a
   long stage, every three or four tasks; and each stage at its end. A fix that tests
@@ -118,14 +117,6 @@ waits for the owner. Evidence goes to `docs/history/` or linked files. When a st
 done, move its tasks to `docs/history/stage-<N>.md` and leave one summary line, so the
 file stays short. Keep the context small: find code by search, read only the lines you
 need, and keep command output short (quiet test runs, the end of a log).
-
-Wait for a long command instead of checking on it: every check resends the whole
-conversation. In Claude Code run it in the background. In Codex the owner wants no
-progress updates while a command runs, which replaces the default of an update and a
-wait of at most 60 seconds: begin the `exec` call with the line
-`// @exec: {"yield_time_ms": 300000}`, loop on `write_stdin` with empty `chars` and
-`yield_time_ms: 300000`, print each call's `output` and the final `exit_code`, and if
-`exec` returns a running cell, `wait` on it with `yield_time_ms: 300000`.
 
 ## Keeping the owner informed
 

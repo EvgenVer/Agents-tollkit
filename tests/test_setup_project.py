@@ -60,6 +60,14 @@ class SetupProject(unittest.TestCase):
         self.assertEqual(codex["agents"], {"max_concurrent_threads_per_session": 4,
                                            "max_depth": 1})
 
+    def test_codex_only_instructions_stay_out_of_the_shared_rules(self):
+        setup(self.root)
+        codex = tomllib.loads((self.root / ".codex/config.toml").read_text(encoding="utf-8"))
+        agents = (self.root / "AGENTS.md").read_text(encoding="utf-8")
+        for name in ("// @exec:", "write_stdin", "yield_time_ms", "exit_code", "fork_turns"):
+            self.assertIn(name, codex["developer_instructions"])
+            self.assertNotIn(name, agents)
+
     def test_existing_files_are_kept(self):
         self.root.mkdir(parents=True)
         (self.root / "AGENTS.md").write_text("# Own rules\n", encoding="utf-8")
