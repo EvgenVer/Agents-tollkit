@@ -56,24 +56,18 @@ class SetupProject(unittest.TestCase):
         setup(self.root)
         codex = tomllib.loads((self.root / ".codex/config.toml").read_text(encoding="utf-8"))
         self.assertEqual(codex["sandbox_mode"], "workspace-write")
-        self.assertLessEqual(codex["model_auto_compact_token_limit"], 250000)
+        self.assertEqual(codex["model_auto_compact_token_limit"], 100000)
         self.assertEqual(codex["agents"], {"max_concurrent_threads_per_session": 4,
                                            "max_depth": 1})
 
-    def test_codex_only_instructions_stay_out_of_the_shared_rules(self):
+    def test_codex_only_instructions_stay_out_of_the_project_files(self):
+        """They come from the hook: Codex Desktop does not apply developer_instructions."""
         setup(self.root)
         codex = tomllib.loads((self.root / ".codex/config.toml").read_text(encoding="utf-8"))
+        self.assertNotIn("developer_instructions", codex)
         agents = (self.root / "AGENTS.md").read_text(encoding="utf-8")
         for name in ("// @exec:", "write_stdin", "yield_time_ms", "exit_code", "fork_turns"):
-            self.assertIn(name, codex["developer_instructions"])
             self.assertNotIn(name, agents)
-
-    def test_codex_keeps_the_long_wait_for_long_commands(self):
-        setup(self.root)
-        codex = tomllib.loads((self.root / ".codex/config.toml").read_text(encoding="utf-8"))
-        rule = " ".join(codex["developer_instructions"].split())
-        self.assertIn("finish within a minute plainly", rule)
-        self.assertIn("still running when its call returns, never start it again", rule)
 
     def test_existing_files_are_kept(self):
         self.root.mkdir(parents=True)

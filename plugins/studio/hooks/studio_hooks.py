@@ -8,7 +8,9 @@ Usage: studio_hooks.py session-start | guard | stop [--host codex|antigravity]
 session-start  Give the agent the `Now` section of docs/TASKS.md and reminders about the
                project state, so a new session, a compacted context or the other tool
                picks up where work stopped. In an empty folder, point to the idea skill.
-guard          Deny reading secrets and commands that destroy work. Ask the owner before
+               Codex also gets its own rules here: Codex Desktop does not apply
+               developer_instructions, and AGENTS.md is read by the other tools too.
+guard         Deny reading secrets and commands that destroy work. Ask the owner before
                pushing, installing software globally, or touching files outside the
                project. Codex and Antigravity hooks cannot ask, so there those are denied.
 stop           Before the agent stops, make sure work changed or committed in this session
@@ -34,6 +36,28 @@ ARCHITECTURE = Path("docs") / "ARCHITECTURE.md"
 MAX_CONTEXT_CHARS = 4000
 MAX_TASKS_LINES = 150
 MAX_NOW_CHARS = 2500
+CODEX_RULES = """\
+Rules for Codex from the owner:
+
+- Every request resends the whole conversation, so use as few as the work needs. Put related
+  commands in one `exec` call: format, lint and the tests of a change, several files to read,
+  all of `Project commands`.
+- The owner wants no progress updates while a command runs, which replaces the default of an
+  update and a wait of at most 60 seconds. Wait for a command instead of checking on it. Run a
+  command you expect to finish within a minute plainly, and print its `session_id`. For a
+  longer one, such as a test suite or a build, begin the `exec` call with the line
+  `// @exec: {"yield_time_ms": 300000}`, loop on `write_stdin` with empty `chars` and
+  `yield_time_ms: 300000`, print each call's `output` and the final `exit_code`, and if `exec`
+  returns a running cell, `wait` on it with `yield_time_ms: 300000`. If a plain command is
+  still running when its call returns, never start it again: continue its `session_id` in the
+  same way.
+- Narrowing `Project commands` in AGENTS.md: build or check the documentation only when it
+  changed, and run the start-up check only when start-up code changed. Run both before each
+  review and at the end of a stage.
+- Replacing the review of each task that changes the data model, security, money or how parts
+  communicate: have a fresh subagent review together the commits of the last three or four
+  tasks or parts of a task, and before you build on a schema change that cannot be undone.
+  Each stage still gets its review at the end."""
 
 SECRET_NAME = re.compile(
     r"^(\.env(\..+)?|.+\.(pem|key|p12|pfx|jks|keystore)|id_(rsa|dsa|ecdsa|ed25519)"
@@ -353,6 +377,8 @@ def session_context(cwd):
 def session_start(payload, host="claude"):
     remember_start(payload)
     context = session_context(Path(payload.get("cwd") or os.getcwd()).resolve())
+    if host == "codex":
+        context = f"{context}\n\n{CODEX_RULES}" if context else CODEX_RULES
     if host == "antigravity":
         emit({"injectSteps": [{"systemMessage": {"systemMessage": context}}]} if context else {})
     elif context:

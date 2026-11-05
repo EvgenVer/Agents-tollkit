@@ -381,6 +381,24 @@ class SessionStart(ProjectCase):
         os.remove(self.root / "docs" / "TASKS.md")
         self.assertIsNone(run_hook("session-start", {"cwd": str(self.root)}))
 
+    def test_only_codex_gets_the_codex_rules(self):
+        output = run_hook("session-start", {"cwd": str(self.root), "source": "compact"},
+                          "--host", "codex")
+        context = output["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Next step: add the save button", context)
+        for words in ("// @exec:", "write_stdin", "never start it again", "one `exec` call",
+                      "three or four"):
+            self.assertIn(words, context)
+        claude = self.context()
+        self.assertIn("Next step: add the save button", claude)
+        for words in ("exec", "write_stdin", "Rules for Codex"):
+            self.assertNotIn(words, claude)
+
+    def test_codex_gets_its_rules_without_tasks(self):
+        os.remove(self.root / "docs" / "TASKS.md")
+        output = run_hook("session-start", {"cwd": str(self.root)}, "--host", "codex")
+        self.assertEqual(output["hookSpecificOutput"]["additionalContext"], hooks.CODEX_RULES)
+
     def test_points_an_empty_folder_to_the_idea_skill(self):
         folder = Path(self.tmp.name).resolve() / "new-app"
         (folder / ".git").mkdir(parents=True)
@@ -722,6 +740,10 @@ class Packaging(unittest.TestCase):
                          "./hooks/codex-hooks.json")
         for relative in ["hooks/hooks.json", "hooks/codex-hooks.json"]:
             self.assertNotIn("antigravity", (PLUGIN / relative).read_text(encoding="utf-8"))
+        self.assertNotIn("codex", (PLUGIN / "hooks/hooks.json").read_text(encoding="utf-8"))
+        codex_start = self.read("hooks/codex-hooks.json")["hooks"]["SessionStart"][0]["hooks"][0]
+        self.assertIn("session-start --host codex", codex_start["command"])
+        self.assertIn("'session-start','--host','codex'", codex_start["commandWindows"])
         hooks_spec = self.read("hooks.json")["studio"]
         commands = [hooks_spec["SessionStart"][0]["command"],
                     hooks_spec["PreToolUse"][0]["hooks"][0]["command"],

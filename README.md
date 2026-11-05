@@ -24,7 +24,7 @@ Each project ends up with:
 ```text
 AGENTS.md, CLAUDE.md     rules for the agents (CLAUDE.md just imports AGENTS.md)
 .claude/settings.json    plugin and secret-file rules for Claude Code
-.codex/config.toml       sandbox, context and subagent limits, and rules for Codex alone
+.codex/config.toml       sandbox, context and subagent limits for Codex
 zensical.toml            documentation site settings
 docs/                    PRODUCT, ARCHITECTURE, decisions/, components/, flows/, data,
                          operations, glossary, TASKS (with Now: where work stopped),
@@ -124,18 +124,23 @@ outside it and asks you first; allow those commands permanently when it offers.
 ## Keep Codex within its limits
 
 Codex resends the whole conversation with every request, so a long session uses up limits
-fast. The project's `.codex/config.toml` compacts the conversation at 200,000 tokens and
-runs at most four agents at once, with no subagents of subagents. It also tells Codex to
-wait for a long command instead of checking on it, so the agent stays silent for up to
-five minutes at a time; these instructions reach only Codex, not Claude Code or
-Antigravity. Start a new session for each stage, since `docs/TASKS.md` keeps where work
-stands, and choose medium reasoning effort in `/model` for routine building. The rules in
-`AGENTS.md` keep the rest down: the agent runs only the tests that cover a change when the
-full run takes more than ten minutes, and asks for at most two checks of a review's fixes.
+fast. The project's `.codex/config.toml` compacts the conversation at 100,000 tokens and
+runs at most four agents at once, with no subagents of subagents. Start a new session for
+each stage, since `docs/TASKS.md` keeps where work stands, and choose medium reasoning
+effort in `/model` for routine building. The rules in `AGENTS.md` keep the rest down: the
+agent runs only the tests that cover a change when the full run takes more than ten
+minutes, and asks for at most two checks of a review's fixes.
+
+Codex also gets rules of its own from the session-start hook, which neither Claude Code nor
+Antigravity receives. The agent waits for a long command instead of checking on it, so it
+stays silent for up to five minutes at a time. It puts related commands in one call, builds
+the documentation only when that changed, and has commits reviewed in groups of three or
+four. These rules work only while the Codex hooks are trusted in `/hooks`, and after each
+plugin update Codex asks for that again.
 
 Codex applies `.codex/config.toml` only in a project you trust; elsewhere it ignores the
-file without saying so. A project set up with an earlier version gets these rules when you
-update its `AGENTS.md`, and these settings when you copy them from
+file without saying so. A project set up with an earlier version gets the `AGENTS.md` rules
+when you update that file, and these settings when you copy them from
 [the template](plugins/studio/skills/idea/project/codex-config.toml) to its
 `.codex/config.toml`, keeping the top-level ones above the first `[table]`.
 
