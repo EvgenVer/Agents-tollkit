@@ -68,6 +68,13 @@ class SetupProject(unittest.TestCase):
             self.assertIn(name, codex["developer_instructions"])
             self.assertNotIn(name, agents)
 
+    def test_codex_keeps_the_long_wait_for_long_commands(self):
+        setup(self.root)
+        codex = tomllib.loads((self.root / ".codex/config.toml").read_text(encoding="utf-8"))
+        rule = " ".join(codex["developer_instructions"].split())
+        self.assertIn("finish within a minute plainly", rule)
+        self.assertIn("still running when its call returns, never start it again", rule)
+
     def test_existing_files_are_kept(self):
         self.root.mkdir(parents=True)
         (self.root / "AGENTS.md").write_text("# Own rules\n", encoding="utf-8")
