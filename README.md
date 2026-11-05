@@ -124,7 +124,7 @@ outside it and asks you first; allow those commands permanently when it offers.
 ## Keep Codex within its limits
 
 Codex resends the whole conversation with every request, so a long session uses up limits
-fast. The project's `.codex/config.toml` compacts the conversation at 100,000 tokens and
+fast. The project's `.codex/config.toml` compacts the conversation at 200,000 tokens and
 runs at most four agents at once, with no subagents of subagents. Start a new session for
 each stage, since `docs/TASKS.md` keeps where work stands, and choose medium reasoning
 effort in `/model` for routine building. The rules in `AGENTS.md` keep the rest down: the

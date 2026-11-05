@@ -5,7 +5,7 @@ sandbox_mode = "workspace-write"
 approval_policy = "on-request"
 # Every request resends the whole conversation, so compact it before it grows past this
 # many tokens; docs/TASKS.md keeps where work stands.
-model_auto_compact_token_limit = 100000
+model_auto_compact_token_limit = 200000
 
 [sandbox_workspace_write]
 # Package installs and documentation lookups need the network.

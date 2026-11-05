@@ -56,7 +56,7 @@ class SetupProject(unittest.TestCase):
         setup(self.root)
         codex = tomllib.loads((self.root / ".codex/config.toml").read_text(encoding="utf-8"))
         self.assertEqual(codex["sandbox_mode"], "workspace-write")
-        self.assertEqual(codex["model_auto_compact_token_limit"], 100000)
+        self.assertEqual(codex["model_auto_compact_token_limit"], 200000)
         self.assertEqual(codex["agents"], {"max_concurrent_threads_per_session": 4,
                                            "max_depth": 1})
 
