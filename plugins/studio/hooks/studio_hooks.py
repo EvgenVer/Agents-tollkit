@@ -51,9 +51,9 @@ Rules for Codex from the owner:
   returns a running cell, `wait` on it with `yield_time_ms: 300000`. If a plain command is
   still running when its call returns, never start it again: continue its `session_id` in the
   same way.
-- Narrowing `Project commands` in AGENTS.md: build or check the documentation only when it
-  changed, and run the start-up check only when start-up code changed. Run both before each
-  review and at the end of a stage.
+- Narrowing `Project commands` in AGENTS.md: build or check the documentation only when a page
+  other than `docs/TASKS.md` changed, and run the start-up check only when start-up code
+  changed. Run both before each review and at the end of a stage.
 - Replacing the review of each task that changes the data model, security, money or how parts
   communicate: have a fresh subagent review together the commits of the last three or four
   tasks or parts of a task, and before you build on a schema change that cannot be undone.
