@@ -387,11 +387,11 @@ class SessionStart(ProjectCase):
         context = output["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Next step: add the save button", context)
         for words in ("// @exec:", "write_stdin", "never start it again", "one `exec` call",
-                      "three or four"):
+                      "three or four", "four commits"):
             self.assertIn(words, context)
         claude = self.context()
         self.assertIn("Next step: add the save button", claude)
-        for words in ("exec", "write_stdin", "Rules for Codex"):
+        for words in ("exec", "write_stdin", "Rules for Codex", "four commits"):
             self.assertNotIn(words, claude)
 
     def test_codex_gets_its_rules_without_tasks(self):

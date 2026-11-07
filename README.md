@@ -135,7 +135,8 @@ Codex also gets rules of its own from the session-start hook, which neither Clau
 Antigravity receives. The agent waits for a long command instead of checking on it, so it
 stays silent for up to five minutes at a time. It puts related commands in one call, builds
 the documentation only when that changed, and has commits reviewed in groups of three or
-four. These rules work only while the Codex hooks are trusted in `/hooks`. Any change to the
+four. It writes down what closes a task before working on it, and splits a task still open
+after four commits. These rules work only while the Codex hooks are trusted in `/hooks`. Any change to the
 plugin's files, even under the same version, stops all its hooks until you trust them again,
 and Codex downloads such a change by itself when it starts.
 

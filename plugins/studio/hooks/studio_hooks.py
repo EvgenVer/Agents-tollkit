@@ -57,7 +57,13 @@ Rules for Codex from the owner:
 - Replacing the review of each task that changes the data model, security, money or how parts
   communicate: have a fresh subagent review together the commits of the last three or four
   tasks or parts of a task, and before you build on a schema change that cannot be undone.
-  Each stage still gets its review at the end."""
+  Each stage still gets its review at the end.
+- Keeping a task finishable: before working on a task, make sure `docs/TASKS.md` says what
+  closes it, as one result with a check that can pass; if it does not, write that first.
+  Work beyond that result, or work that belongs to another task, becomes its own numbered
+  task with a check. If a task is still open after four commits, close what is proven,
+  split the rest into numbered tasks, tell the owner in your report, and go on. Prefer a
+  thin slice that runs end to end over finishing a layer nothing uses yet."""
 
 SECRET_NAME = re.compile(
     r"^(\.env(\..+)?|.+\.(pem|key|p12|pfx|jks|keystore)|id_(rsa|dsa|ecdsa|ed25519)"
