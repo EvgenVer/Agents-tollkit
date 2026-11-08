@@ -11,8 +11,9 @@ session-start  Give the agent the `Now` section of docs/TASKS.md and reminders a
                Codex also gets its own rules here: Codex Desktop does not apply
                developer_instructions, and AGENTS.md is read by the other tools too.
 guard         Deny reading secrets and commands that destroy work. Ask the owner before
-               pushing, installing software globally, or touching files outside the
-               project. Codex and Antigravity hooks cannot ask, so there those are denied.
+               pushing to the main branch, installing software globally, touching files
+               outside the project and its extra folders, or changing which folders those
+               are. Codex and Antigravity hooks cannot ask, so there those are denied.
 stop           Before the agent stops, make sure work changed or committed in this session
                is recorded in TASKS.md and that documentation pages about the changed,
                deleted or renamed files are still true.
@@ -24,7 +25,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -164,7 +164,10 @@ READ_OUTSIDE_REASON = (
     "This path is outside the project folder; reading it needs the owner's approval. "
     "Stay inside the project when you can."
 )
-PUSH_REASON = "Pushing publishes commits to a remote repository; the owner decides."
+PUSH_REASON = ("This pushes to the main branch, or to branches that cannot be told from the "
+               "command; the owner decides. Pushing a working branch needs no approval.")
+SETTINGS_REASON = ("This file sets which folders and commands the agent may use; changing it "
+                   "needs the owner's approval.")
 INSTALL_REASON = (
     "This installs software globally, outside the project. Install dependencies inside "
     "the project instead: Python into .venv (.venv\\Scripts\\python -m pip install ... on "
@@ -189,6 +192,15 @@ DESTRUCTIVE_PATTERNS = [
      "Disk-level commands are never needed for this project."),
 ]
 PUSH_PATTERN = re.compile(r"\bgit\s+push\b")
+MAIN_BRANCHES = {"main", "master"}
+# git push options that take a value, and those that push branches the command does not name.
+PUSH_VALUE_OPTIONS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+PUSH_UNNAMED = {"--all", "--mirror", "--tags", "--delete", "-d", "--prune", "--branches"}
+SETTINGS_FILES = {"settings.json", "settings.local.json"}
+# A variable set to a literal value, in Bash (NAME=value) or PowerShell ($Name = value).
+ASSIGNMENT = re.compile(r"^(?:export\s+)?([A-Za-z_]\w*)=(.*)$|^\$([A-Za-z_]\w*)\s*=\s*(.+)$",
+                        re.DOTALL)
+VARIABLE = re.compile(r"\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
 
 
 def emit(payload):
@@ -427,21 +439,47 @@ def resolve_path(value, cwd):
 
 
 def guard_root(cwd):
-    top = git_toplevel(cwd)
-    if top:
-        return top
-    if os.environ.get("CLAUDE_PROJECT_DIR"):
-        return Path(os.environ["CLAUDE_PROJECT_DIR"]).resolve()
-    return Path(cwd).resolve()
+    """The project: the repository of the folder Claude Code started in, else of the folder
+    the call runs in. A command may have moved into a clone kept inside the project; that
+    clone is not the whole project."""
+    start = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
+    return git_toplevel(start) or Path(start).resolve()
+
+
+def extra_dirs(root):
+    """Folders the owner lets the agent use beside the project: `additionalDirectories` under
+    `permissions` in the project's .claude/settings.json or settings.local.json, the setting
+    Claude Code itself reads for this. A whole drive does not count."""
+    dirs = []
+    for name in SETTINGS_FILES:
+        try:
+            settings = json.loads((root / ".claude" / name).read_text(encoding="utf-8-sig"))
+            entries = settings["permissions"]["additionalDirectories"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, str) or not entry.strip():
+                continue
+            path = Path(native_path(entry)).expanduser()
+            path = (path if path.is_absolute() else root / path).resolve()
+            if path.parent != path:
+                dirs.append(path)
+    return dirs
 
 
 def scratch_dirs(payload):
     """Folders besides the project where the agent may write and delete files."""
     dirs = [Path(tempfile.gettempdir()).resolve()]
-    for folder in [payload.get("scratchpad_dir"), *payload.get("workspace_dirs", [])]:
+    for folder in [payload.get("scratchpad_dir"), *payload.get("workspace_dirs", []),
+                   *payload.get("extra_dirs", [])]:
         if folder:
             dirs.append(Path(folder).resolve())
     return dirs
+
+
+def settings_file(path, root):
+    """True for the project's Claude Code settings, which say what the agent may use."""
+    return path.parent == root / ".claude" and path.name.lower() in SETTINGS_FILES
 
 
 def agent_dirs(writing, payload):
@@ -455,7 +493,10 @@ def agent_dirs(writing, payload):
 
 
 def outside_project(path, root, payload, writing):
-    """The reason to ask when a file tool reaches outside the project, else None."""
+    """The reason to ask when a file tool reaches outside the project, or changes what the
+    agent may use, else None."""
+    if writing and settings_file(path, root):
+        return SETTINGS_REASON
     allowed = [root, *scratch_dirs(payload), *agent_dirs(writing, payload)]
     if any(is_inside(path, folder) for folder in allowed):
         return None
@@ -540,18 +581,59 @@ def names_secret_file(text, cwd):
 
 
 def command_words(segment):
-    try:
-        words = shlex.split(segment, posix=False)
-    except ValueError:
-        words = segment.split()
-    return [word.strip("'\"") for word in words]
+    """The words of a command, split at spaces outside quotes, quotes removed, so that
+    "$dir"/*.png is one word. With unbalanced quotes, split at every space."""
+    words, current, quote, started = [], [], None, False
+    for char in segment:
+        if quote:
+            if char == quote:
+                quote = None
+            else:
+                current.append(char)
+        elif char in "'\"":
+            quote, started = char, True
+        elif char.isspace():
+            if started:
+                words.append("".join(current))
+            current, started = [], False
+        else:
+            current.append(char)
+            started = True
+    if quote:
+        return [word.strip("'\"") for word in segment.split()]
+    if started:
+        words.append("".join(current))
+    return words
+
+
+def expand_variables(segment, values):
+    """The segment with variables set earlier in the command line replaced by their values;
+    a variable set here to a literal value is remembered, any other assignment forgets it."""
+    def known(match):
+        name = match.group(1) or match.group(2)
+        return values.get(name, match.group())
+
+    segment = VARIABLE.sub(known, segment)
+    assigned = ASSIGNMENT.match(segment.strip())
+    if assigned:
+        name = assigned.group(1) or assigned.group(3)
+        value = assigned.group(2) if assigned.group(1) else assigned.group(4)
+        words = command_words(value)
+        literal = len(words) == 1 and not re.search(r"[$`(){}]", value)
+        if literal:
+            values[name] = words[0]
+        else:
+            values.pop(name, None)
+    return segment
 
 
 def located_segments(command, cwd):
-    """(segment, folder it runs in) for each segment, following cd, Set-Location, pushd
-    and popd to literal paths. A folder held in a variable is not followed."""
-    located, stack = [], []
+    """(segment, folder it runs in) for each segment, with variables set to literal values
+    earlier in the line replaced, following cd, Set-Location, pushd and popd. A folder held
+    in a variable of unknown value is not followed."""
+    located, stack, values = [], [], {}
     for segment in command_segments(command):
+        segment = expand_variables(segment, values)
         located.append((segment, cwd))
         words = command_words(segment)
         name = words[0].lstrip("(").lower() if words else ""
@@ -669,8 +751,9 @@ def deletion_risk(segment, cwd, root, payload):
         if recursive and is_inside(root, resolved) and (
                 resolved != root or not wildcard or candidate.name in WHOLE_FOLDER_WILDCARDS):
             return outside  # the project itself, or a folder that contains it
-        if any(is_inside(resolved, folder) and resolved != folder for folder in scratch):
-            continue
+        if any(is_inside(resolved, folder) and (resolved != folder or wildcard and not recursive)
+               for folder in scratch):
+            continue  # files in the temporary or an extra folder, not the folder itself
         if not is_inside(resolved, root):
             return outside
     return None
@@ -752,6 +835,78 @@ def global_install(segment, venv_active):
     return not (in_venv or explicit_target)
 
 
+def branch_name(ref):
+    for prefix in ("refs/heads/", "heads/"):
+        if ref.startswith(prefix):
+            return ref[len(prefix):]
+    return ref
+
+
+def push_branches(segment, cwd):
+    """The branch names a `git push` in this segment updates on the remote, and the
+    remote's default branch, or None when the command does not say which branches."""
+    words = command_words(segment)
+    names = [Path(word).stem.lower() for word in words]
+    if "git" not in names:
+        return None
+    index = names.index("git") + 1
+    while index < len(words) and words[index].startswith("-"):
+        option = words[index]
+        index += 1
+        if option in ("-C", "-c", "--git-dir", "--work-tree", "--namespace"):
+            if option == "-C" and index < len(words):
+                cwd = str(resolve_path(words[index], cwd))
+            index += 1
+    if index >= len(words) or words[index] != "push":
+        return None
+    positional, index = [], index + 1
+    while index < len(words):
+        word = words[index]
+        index += 1
+        if word in PUSH_UNNAMED or word.split("=")[0] in PUSH_UNNAMED:
+            return None
+        if word.startswith("--force") or re.fullmatch(r"-[a-zA-Z]*f[a-zA-Z]*", word):
+            return None  # a force-push, even in a cluster such as -fu
+        if re.match(r"^[0-9&]?>", word):
+            index += 1 if re.fullmatch(r"[0-9&]?>>?", word) else 0
+            continue  # a redirect of the output, and its file
+        if word in PUSH_VALUE_OPTIONS:
+            index += 1
+        elif not word.startswith("-"):
+            positional.append(word)
+    remote, refspecs = (positional[0], positional[1:]) if positional else ("", [])
+    current = (run_git(cwd, "symbolic-ref", "--quiet", "--short", "HEAD") or "").strip()
+    branches = []
+    if not refspecs:
+        if not current:
+            return None
+        upstream = (run_git(cwd, "config", f"branch.{current}.merge") or "").strip()
+        branches = [current, branch_name(upstream)] if upstream else [current]
+    for refspec in refspecs:
+        if re.search(r"[$%+*]", refspec) or refspec.startswith(":"):
+            return None  # unknown, forced, a pattern, or a deletion on the remote
+        target = branch_name(refspec.split(":")[-1])
+        if target == "HEAD":
+            if not current:
+                return None
+            target = current
+        branches.append(target)
+    default = run_git(cwd, "symbolic-ref", "--quiet", "--short",
+                      f"refs/remotes/{remote or 'origin'}/HEAD")
+    return branches, default.strip().split("/", 1)[-1] if default else None
+
+
+def pushes_working_branches(segment, cwd):
+    """True when a `git push` updates only branches other than main, master and the
+    remote's default branch."""
+    found = push_branches(segment, cwd)
+    if not found:
+        return False
+    branches, default = found
+    return bool(branches) and not any(name in MAIN_BRANCHES or name == default
+                                      for name in branches)
+
+
 def segment_decision(segment, cwd, root, payload, venv_active):
     prose_free = strip_prose(GIT_GLOBAL_OPTIONS.sub("git", segment))
     for pattern, reason in DESTRUCTIVE_PATTERNS:
@@ -764,7 +919,7 @@ def segment_decision(segment, cwd, root, payload, venv_active):
         reason = outside_project(resolve_path(target, cwd), root, payload, True)
         if reason:
             return ASK, reason
-    if PUSH_PATTERN.search(prose_free):
+    if PUSH_PATTERN.search(prose_free) and not pushes_working_branches(segment, cwd):
         return ASK, PUSH_REASON
     if global_install(segment, venv_active):
         return ASK, INSTALL_REASON
@@ -792,6 +947,10 @@ def guard_decision(payload):
     tool = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
     cwd = payload.get("cwd") or os.getcwd()
+    if tool not in FILE_TOOLS | SEARCH_TOOLS | SHELL_TOOLS | {"apply_patch"}:
+        return None
+    root = guard_root(cwd)
+    payload = {**payload, "extra_dirs": extra_dirs(root)}
 
     if tool in FILE_TOOLS:
         value = tool_input.get("file_path") or tool_input.get("notebook_path")
@@ -800,7 +959,7 @@ def guard_decision(payload):
         path = resolve_path(value, cwd)
         if is_secret_path(value) and not (tool == "Write" and not path.exists()):
             return DENY, SECRET_REASON  # creating a new file reveals nothing
-        reason = outside_project(path, guard_root(cwd), payload, tool in WRITE_TOOLS)
+        reason = outside_project(path, root, payload, tool in WRITE_TOOLS)
         return (ASK, reason) if reason else None
     if tool in SEARCH_TOOLS:
         value = tool_input.get("path")
@@ -812,7 +971,7 @@ def guard_decision(payload):
             base = re.split(r"[*?\[{]", native_path(pattern))[0] or None
         if not base:
             return None
-        reason = outside_project(resolve_path(base, cwd), guard_root(cwd), payload, False)
+        reason = outside_project(resolve_path(base, cwd), root, payload, False)
         return (ASK, reason) if reason else None
 
     command = tool_input.get("command")
@@ -825,7 +984,6 @@ def guard_decision(payload):
                            command, re.MULTILINE)
         if any(kind in ("Update File", "Delete File") and is_secret_path(f) for kind, f in files):
             return DENY, SECRET_REASON
-        root = guard_root(cwd)
         for _, value in files:
             reason = outside_project(resolve_path(value.strip(), cwd), root, payload, True)
             if reason:
@@ -833,7 +991,7 @@ def guard_decision(payload):
         return None
     if tool not in SHELL_TOOLS:
         return None
-    return shell_decision(command, cwd, guard_root(cwd), payload)
+    return shell_decision(command, cwd, root, payload)
 
 
 def strongest(results):

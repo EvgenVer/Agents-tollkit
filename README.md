@@ -17,7 +17,7 @@ Toolkit v1 is preserved under the git tag `v1-legacy`.
 | `idea` skill | [skills/idea](plugins/studio/skills/idea/SKILL.md) | Sets up a new project with a script, then brainstorms the idea with you into `docs/PRODUCT.md` |
 | `design` skill | [skills/design](plugins/studio/skills/design/SKILL.md) | Technical interview: architecture, stack and libraries go to `docs/ARCHITECTURE.md` and `docs/decisions/`, stages to `docs/TASKS.md` |
 | `docs` skill | [skills/docs](plugins/studio/skills/docs/SKILL.md) | Technical documentation site: Markdown with Mermaid diagrams, code embedded from the source, hover hints for terms, dark theme |
-| Hooks | [hooks](plugins/studio/hooks/studio_hooks.py) | Restore where work stopped; block secrets and destructive commands; ask before pushing, global installs and files outside the project; check records and docs before stopping |
+| Hooks | [hooks](plugins/studio/hooks/studio_hooks.py) | Restore where work stopped; block secrets and destructive commands; ask before pushing to the main branch, global installs and files outside the project; check records and docs before stopping |
 
 Each project ends up with:
 
@@ -90,13 +90,22 @@ The agent works without asking for each step. What stops it is deterministic:
 |---|---|---|---|
 | Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project. On Windows it works only after the sandbox setup below | not set up by studio; Antigravity's own permission settings apply |
 | Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same | the same |
-| Hooks: owner asked | `git push`, global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects) | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked | denied with an explanation as in Codex, because Antigravity shows no prompt when a hook asks; the agent's own folders under `~/.gemini` stay readable and its plan artifacts writable |
+| Hooks: owner asked | `git push` to `main`, `master` or the remote's default branch, or to branches the command does not name (`--all`, `--tags`, deletions, a variable); pushing a working branch is allowed; global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects); changing the project's `.claude/settings.json` or `settings.local.json` | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked | denied with an explanation as in Codex, because Antigravity shows no prompt when a hook asks; the agent's own folders under `~/.gemini` stay readable and its plan artifacts writable |
 | Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md or Now, empty project commands; before stopping, each reminder once per session: record evidence for work changed or committed in the session, update Now, check pages that mention changed or deleted files | the same; subagents are not sent back | the same; before stopping, the agent is sent back once per turn |
 
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
 cannot see. Quoted text and the scripts and messages passed in here-documents count as
 text: a `>` there is no redirect, and such a script is denied only when it names a secret
 file that exists. On Windows a `/tmp` path counts as the temporary folder, as in Git Bash.
+A variable set to a plain value earlier in the same command, such as `W="..."; cd "$W"`,
+counts as that value. The project is the repository Claude Code started in, so a clone
+kept inside the project does not hide the rest of it.
+
+Folders the agent works in beside the project, such as the working folder of a program it
+drives or a folder for test installs, go under `permissions.additionalDirectories` in the
+project's `.claude/settings.local.json` (or `settings.json`). Claude Code then stops asking
+about them, and the hooks treat them like the temporary folder in all three tools: the agent
+reads, writes and deletes files there, but never deletes such a folder or everything in it.
 Commit often, and keep backups of important folders outside your projects.
 
 In Antigravity a hook that fails would block every tool, so the studio hooks let the

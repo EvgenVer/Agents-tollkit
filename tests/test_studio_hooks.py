@@ -63,6 +63,10 @@ def forget_start(test, session, root):
 
 class ProjectCase(unittest.TestCase):
     def setUp(self):
+        # Run as if Claude Code started in the test project, whatever started the tests.
+        saved = os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        if saved is not None:
+            self.addCleanup(os.environ.__setitem__, "CLAUDE_PROJECT_DIR", saved)
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name).resolve() / "project"
         (self.root / "docs").mkdir(parents=True)
@@ -173,6 +177,28 @@ class Git(ProjectCase):
         self.assertDecision(None, "Bash", ['git commit -m "fix it; then git push later"',
                                            "python - <<'EOF'\nprint('git push')\nEOF"])
 
+    def test_pushing_a_working_branch_is_allowed(self):
+        git(self.root, "checkout", "-q", "-b", "feature")
+        self.assertDecision(None, "Bash", [
+            "git push", "git push -u origin feature", "git push origin HEAD",
+            "git push origin feature 2>&1 | tail -3", "git -C . push --set-upstream origin feature",
+            'git push origin feature && git commit -m "then push to main"'])
+        self.assertDecision(None, "PowerShell", [
+            "git push origin feature; \"push $LASTEXITCODE\"",
+            "git push origin feature 2>&1 | Select-Object -Last 2"])
+        # The main branch, or branches the command does not name, still need the owner.
+        self.assertDecision("ask", "Bash", [
+            "git push origin main", "git push origin master", "git push origin feature:main",
+            "git push origin HEAD:refs/heads/master", "git push --all", "git push --tags",
+            "git push origin --delete feature", "git push origin :feature",
+            'git push origin "$BRANCH"', "git push origin feature main", "git push -fu origin x"])
+        # A branch that tracks main, and the remote's default branch, are the main branch too.
+        git(self.root, "config", "branch.feature.merge", "refs/heads/main")
+        self.assertDecision("ask", "Bash", ["git push", "git push origin"])
+        git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+        self.assertDecision("ask", "Bash", ["git push origin develop"])
+        self.assertDecision(None, "Bash", ["git push origin feature"])
+
     def test_options_before_the_git_command(self):
         self.assertDecision("deny", "Bash", [
             "git -C . reset --hard", f'git -C "{self.root}" clean -fd',
@@ -264,6 +290,35 @@ class OutsideFiles(ProjectCase):
         self.assertDecision("deny", "Bash", ["cd .. && rm -rf project",
                                              f"cd {documents} && rm -rf ."])
 
+    def test_variables_set_in_the_command_are_followed(self):
+        work = Path(tempfile.gettempdir()) / "studio-hook-wt"
+        documents = OUTSIDE.parent
+        self.assertDecision(None, "Bash", [
+            f'W="{work.as_posix()}"; cd "$W" && node setup.mjs > ../setup.log 2>&1',
+            f'W="{work.as_posix()}"; cat >> "$W/notes.txt" <<\'EOF\'\nx\nEOF',
+            "O=build/out; rm -f \"$O\"/*.png \"$O\"/mosaics/*.png",
+            f'D="{documents.as_posix()}"; D=$(pwd); cd "$D" && echo hi > x.txt'])
+        self.assertDecision(None, "PowerShell", ["$S = 'src'; Set-Content \"$S\\notes.txt\" -Value 1"])
+        self.assertDecision("ask", "Bash", [
+            'rm -f "$O"/*.png', f'D="{documents.as_posix()}"; cd "$D" && echo hi > x.txt',
+            f'D="{documents.as_posix()}"; rm "${{D}}/notes.txt"'])
+        self.assertDecision("ask", "PowerShell", [
+            f"$S = '{documents}'; Set-Content \"$S\\notes.txt\" -Value 1"])
+
+    def test_a_clone_inside_the_project_is_still_the_project(self):
+        clone = self.root / "runtime" / "lib-src"
+        clone.mkdir(parents=True)
+        git(clone, "init", "-q")
+        os.environ["CLAUDE_PROJECT_DIR"] = str(self.root)
+        self.addCleanup(os.environ.pop, "CLAUDE_PROJECT_DIR", None)
+        for tool, path in [("Edit", self.root / "app.py"), ("Write", clone / "x.py")]:
+            result = hooks.guard_decision({"tool_name": tool, "cwd": str(clone),
+                                           "tool_input": {"file_path": str(path)}})
+            self.assertIsNone(result, (tool, path))
+        result = hooks.guard_decision({"tool_name": "Write", "cwd": str(clone),
+                                       "tool_input": {"file_path": str(OUTSIDE)}})
+        self.assertEqual(result[0], "ask")
+
     def test_project_temp_and_agent_folders_are_allowed(self):
         notes = Path.home() / ".claude" / "projects" / "demo" / "memory" / "note.md"
         for tool, path in [("Read", self.root / "app.py"), ("Write", "src/new.py"),
@@ -284,6 +339,41 @@ class OutsideFiles(ProjectCase):
         # The temporary folder as a whole stays protected, and a similar name is not it.
         self.assertDecision("deny", "Bash", ["rm -rf /tmp", "rm -rf /tmp/*"])
         self.assertDecision("ask", "Bash", ["cp app.py /tmpfiles/copy.py"])
+
+
+class ExtraFolders(ProjectCase):
+    EXTRA = Path.home() / "studio-hook-extra"  # never created: paths are only compared
+
+    def allow(self, *folders, name="settings.local.json"):
+        (self.root / ".claude").mkdir(exist_ok=True)
+        settings = {"permissions": {"additionalDirectories": [str(f) for f in folders]}}
+        (self.root / ".claude" / name).write_text(json.dumps(settings), encoding="utf-8")
+
+    def test_folders_from_claude_settings_are_like_the_temp_folder(self):
+        extra = self.EXTRA
+        self.assertEqual(self.decision("Write", file_path=str(extra / "a.txt")), "ask")
+        self.allow(extra, name="settings.json")
+        for tool in ["Read", "Write", "Edit"]:
+            self.assertIsNone(self.decision(tool, file_path=str(extra / "Work" / "a.txt")), tool)
+        self.assertDecision(None, "Bash", [
+            f'echo hi > "{extra}/out.txt"', f'rm "{extra}/Work/a.frame"',
+            f'rm -f "{extra.as_posix()}/Work"/*.frame', f'rm "{extra}"/*.txt',
+            f'rm -rf "{extra}/Work/tmp"', f'cd "{extra}" && rm -v Data/a.txt Work/b.ald'])
+        # The folder itself, everything in it, and other folders stay protected.
+        self.assertDecision("deny", "Bash", [f'rm -rf "{extra}"', f'rm -rf "{extra}"/*'])
+        self.assertDecision("ask", "Bash", [f"echo hi > {OUTSIDE}"])
+
+    def test_a_whole_drive_does_not_count(self):
+        self.allow(Path(OUTSIDE.anchor))
+        self.assertEqual(self.decision("Write", file_path=str(OUTSIDE)), "ask")
+
+    def test_changing_the_settings_needs_the_owner(self):
+        self.allow(self.EXTRA)
+        for name in ["settings.json", "settings.local.json"]:
+            path = self.root / ".claude" / name
+            self.assertEqual(self.decision("Edit", file_path=str(path)), "ask", name)
+            self.assertIsNone(self.decision("Read", file_path=str(path)), name)
+        self.assertDecision("ask", "Bash", ["echo {} > .claude/settings.json"])
 
 
 class Installs(ProjectCase):
@@ -331,6 +421,9 @@ class GuardOutput(ProjectCase):
         decision = output["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "deny")
         self.assertIn("Codex", decision["permissionDecisionReason"])
+        git(self.root, "checkout", "-q", "-b", "feature")
+        self.assertIsNone(run_hook("guard", self.payload("git push -u origin feature"),
+                                   "--host", "codex"))
 
 
 class SessionStart(ProjectCase):
@@ -687,7 +780,7 @@ class Antigravity(ProjectCase):
         asked = guard(CommandLine="git push")
         self.assertEqual(asked["decision"], "deny")  # Antigravity shows no prompt for ask
         self.assertIn("Antigravity hooks cannot ask", asked["reason"])
-        self.assertIn("Pushing publishes", asked["reason"])
+        self.assertIn("pushes to the main branch", asked["reason"])
         self.assertEqual(guard(CommandLine="git clean -fd")["decision"], "deny")
 
     def test_session_start(self):
