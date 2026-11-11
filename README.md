@@ -96,7 +96,9 @@ The agent works without asking for each step. What stops it is deterministic:
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
 cannot see. Quoted text and the scripts and messages passed in here-documents count as
 text: a `>` there is no redirect, and such a script is denied only when it names a secret
-file that exists. On Windows a `/tmp` path counts as the temporary folder, as in Git Bash.
+file that exists. In a Python script only a string of its own counts, such as `open('.env')`
+or `ROOT / '.env'`: the name inside code the script writes into a file, or in a comment,
+does not. On Windows a `/tmp` path counts as the temporary folder, as in Git Bash.
 Notes the Claude desktop app keeps for a side session (`Claude-Data/.../side-session-notes`)
 count as the agent's own folder.
 A variable set to a plain value earlier in the same command, such as `W="..."; cd "$W"`,

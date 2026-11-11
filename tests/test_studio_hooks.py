@@ -150,6 +150,15 @@ class Secrets(ProjectCase):
         self.assertDecision("deny", "Bash", [
             "python - <<'EOF'\nfrom pathlib import Path\nprint(Path('.env').read_text())\nEOF"])
         self.assertDecision("deny", "PowerShell", ["@'\nprint(open('.env').read())\n'@ | python -"])
+        self.assertDecision("deny", "Bash", [
+            "python - <<'EOF'\nfrom pathlib import Path\nROOT = Path('.')\nprint((ROOT / '.env').read_text())\nEOF",
+            "node - <<'EOF'\nconsole.log(require('fs').readFileSync('.env', 'utf8'))\nEOF"])
+        # A script that writes code naming the file, or mentions it in a comment, opens nothing.
+        self.assertDecision(None, "PowerShell", [
+            "@'\nfrom pathlib import Path\np = Path('app.py')\n"
+            "p.write_text(p.read_text().replace('a', 'cfg = Settings(_env_file=ROOT / \".env\")'))\n"
+            "'@ | python -",
+            "@'\n# the app loads .env at run time\nprint(1)\n'@ | python -"])
         # A word that only looks like a secret file, and a commit message, read nothing.
         self.assertDecision(None, "Bash", [
             "python - <<'EOF'\nnote = 'the ledger keeps no credentials; 5 runs'\nEOF",

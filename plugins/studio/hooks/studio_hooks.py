@@ -21,6 +21,7 @@ stop           Before the agent stops, make sure work changed or committed in th
 A failure inside a hook never blocks the agent: errors go to stderr and exit 0.
 """
 
+import ast
 import hashlib
 import json
 import os
@@ -582,11 +583,19 @@ def split_documents(command):
 
 
 def names_secret_file(text, cwd):
-    """True when the text names a secret file that exists, such as a script loading .env."""
-    for token in TOKEN.findall(text):
-        if is_secret_path(token) and exists(resolve_path(token, cwd)):
-            return True
-    return False
+    """True when a script names a secret file that exists, such as one loading .env. In a
+    Python script only a string of its own without spaces counts: the name inside code the
+    script writes into another file, or in a comment, does not open the file. Any other
+    script counts every name outside quoted text with spaces."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        candidates = TOKEN.findall(strip_prose(text))
+    else:
+        candidates = [node.value for node in ast.walk(tree)
+                      if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                      and not any(char.isspace() for char in node.value)]
+    return any(is_secret_path(name) and exists(resolve_path(name, cwd)) for name in candidates)
 
 
 def command_words(segment):
