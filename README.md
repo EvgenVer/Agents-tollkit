@@ -97,6 +97,8 @@ Hooks are a safety net, not a wall: a script the agent writes can still do what 
 cannot see. Quoted text and the scripts and messages passed in here-documents count as
 text: a `>` there is no redirect, and such a script is denied only when it names a secret
 file that exists. On Windows a `/tmp` path counts as the temporary folder, as in Git Bash.
+Notes the Claude desktop app keeps for a side session (`Claude-Data/.../side-session-notes`)
+count as the agent's own folder.
 A variable set to a plain value earlier in the same command, such as `W="..."; cd "$W"`,
 counts as that value. The project is the repository Claude Code started in, so a clone
 kept inside the project does not hide the rest of it.
@@ -144,8 +146,9 @@ Codex also gets rules of its own from the session-start hook, which neither Clau
 Antigravity receives. The agent waits for a long command instead of checking on it, so it
 stays silent for up to five minutes at a time. It puts related commands in one call, builds
 the documentation only when that changed, and has commits reviewed in groups of three or
-four. It writes down what closes a task before working on it, and splits a task still open
-after four commits. These rules work only while the Codex hooks are trusted in `/hooks`. Any change to the
+four. It writes down what closes a task before working on it, splits a task still open
+after four commits, and does not end its turn while the task is open and nothing blocks it.
+These rules work only while the Codex hooks are trusted in `/hooks`. Any change to the
 plugin's files, even under the same version, stops all its hooks until you trust them again,
 and Codex downloads such a change by itself when it starts.
 

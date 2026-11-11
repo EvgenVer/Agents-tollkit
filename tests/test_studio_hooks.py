@@ -329,6 +329,15 @@ class OutsideFiles(ProjectCase):
         self.assertIsNone(self.decision("Grep", pattern="x"))
         self.assertIsNone(self.decision("Glob", pattern="**/*.py"))
 
+    def test_side_session_notes_of_the_desktop_app_are_allowed(self):
+        data = Path.home() / "AppData" / "Local" / "Claude-Data" / "claude_abc"
+        notes = data / "side-session-notes" / "local_123" / "t53-progress.md"
+        for tool in ["Read", "Write", "Edit"]:
+            self.assertIsNone(self.decision(tool, file_path=str(notes)), tool)
+        self.assertDecision(None, "Bash", [f'echo done >> "{notes}"'])
+        # Elsewhere in the app's data folder is still outside.
+        self.assertEqual(self.decision("Write", file_path=str(data / "config.json")), "ask")
+
     @unittest.skipUnless(os.name == "nt", "Git Bash paths exist on Windows only")
     def test_git_bash_tmp_is_the_temporary_folder(self):
         self.assertDecision(None, "Bash", [
@@ -480,11 +489,11 @@ class SessionStart(ProjectCase):
         context = output["hookSpecificOutput"]["additionalContext"]
         self.assertIn("Next step: add the save button", context)
         for words in ("// @exec:", "write_stdin", "never start it again", "one `exec` call",
-                      "three or four", "four commits"):
+                      "three or four", "four commits", "not a stopping point"):
             self.assertIn(words, context)
         claude = self.context()
         self.assertIn("Next step: add the save button", claude)
-        for words in ("exec", "write_stdin", "Rules for Codex", "four commits"):
+        for words in ("exec", "write_stdin", "Rules for Codex", "four commits", "stopping point"):
             self.assertNotIn(words, claude)
 
     def test_codex_gets_its_rules_without_tasks(self):

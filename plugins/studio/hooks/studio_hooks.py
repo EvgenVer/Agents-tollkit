@@ -63,7 +63,11 @@ Rules for Codex from the owner:
   Work beyond that result, or work that belongs to another task, becomes its own numbered
   task with a check. If a task is still open after four commits, close what is proven,
   split the rest into numbered tasks, tell the owner in your report, and go on. Prefer a
-  thin slice that runs end to end over finishing a layer nothing uses yet."""
+  thin slice that runs end to end over finishing a layer nothing uses yet.
+- Ending a turn: do not end it while the task the owner gave you is open and nothing blocks
+  it; a report in the middle of a task is not a stopping point. End it when the task is done,
+  when you need the owner's decision, when the same check has failed three times, or when the
+  owner only asked a question."""
 
 SECRET_NAME = re.compile(
     r"^(\.env(\..+)?|.+\.(pem|key|p12|pfx|jks|keystore)|id_(rsa|dsa|ecdsa|ed25519)"
@@ -83,6 +87,9 @@ WHOLE_FOLDER_WILDCARDS = {"*", "*.*", ".*"}
 # Folders of the agents themselves: readable, and writable only where they keep notes.
 AGENT_DIRS = [".claude", ".codex", ".agents"]
 AGENT_NOTE_DIRS = [os.path.join(".claude", "projects"), os.path.join(".claude", "plans")]
+# Notes the Claude desktop app keeps for a side session, in its own data folder.
+SIDE_SESSION_NOTES = re.compile(r"[\\/]Claude-Data[\\/][^\\/]+[\\/]side-session-notes(?:[\\/]|$)",
+                                re.IGNORECASE)
 SYSTEM_INSTALLERS = {"winget", "choco", "scoop", "brew", "apt", "apt-get", "dnf", "yum",
                      "pacman", "snap", "cargo", "go", "gem", "pipx"}
 # Shell commands that write files, and which argument names the destination.
@@ -497,6 +504,8 @@ def outside_project(path, root, payload, writing):
     agent may use, else None."""
     if writing and settings_file(path, root):
         return SETTINGS_REASON
+    if is_inside(path, Path.home().resolve()) and SIDE_SESSION_NOTES.search(str(path)):
+        return None
     allowed = [root, *scratch_dirs(payload), *agent_dirs(writing, payload)]
     if any(is_inside(path, folder) for folder in allowed):
         return None
