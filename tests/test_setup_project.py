@@ -1,5 +1,6 @@
 """Checks for plugins/studio/skills/idea/scripts/setup_project.py."""
 
+import json
 import os
 import subprocess
 import sys
@@ -59,6 +60,12 @@ class SetupProject(unittest.TestCase):
         self.assertEqual(codex["model_auto_compact_token_limit"], 200000)
         self.assertEqual(codex["agents"], {"max_concurrent_threads_per_session": 4,
                                            "max_depth": 1})
+
+    def test_claude_code_gets_the_same_subagent_limits(self):
+        setup(self.root)
+        settings = json.loads((self.root / ".claude/settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["env"], {"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "4",
+                                           "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"})
 
     def test_codex_only_instructions_stay_out_of_the_project_files(self):
         """They come from the hook: Codex Desktop does not apply developer_instructions."""
