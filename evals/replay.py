@@ -2,7 +2,7 @@
 """Replay finished tasks of a real project against a copy of the studio plugin.
 
 Usage: python evals/replay.py --label NAME --project DIR [--plugin DIR] [--task T6.2]
-                              [--model opus] [--effort medium] [--mode-note TEXT] [--keep]
+                              [--model sonnet] [--effort medium] [--mode-note TEXT] [--keep]
 
 For each task the project is cloned at the commit before the task was done, into a
 temporary folder with no remote, so the real project is never touched. Its AGENTS.md is
@@ -207,7 +207,7 @@ def main():
     parser.add_argument("--project", required=True)
     parser.add_argument("--plugin", default=str(HERE.parent / "plugins" / "studio"))
     parser.add_argument("--task", action="append", choices=sorted(TASKS))
-    parser.add_argument("--model", default="opus")
+    parser.add_argument("--model", default="sonnet")
     parser.add_argument("--effort", default="medium")
     parser.add_argument("--mode-note", help="text added to the request, for comparing modes")
     parser.add_argument("--keep", action="store_true")
