@@ -90,10 +90,10 @@ cross several parts.
 
 ## Keep the documentation true
 
-- Update the affected pages in the same commit as the code they describe. The stop hook
-  lists pages that mention files you changed.
+- Update the affected pages in the same commit as the code they describe.
 - At the end of each stage, refresh `index.md` (diagram of the parts as they exist now,
-  stage progress, latest decisions) and the pages of the parts that changed.
+  stage progress, latest decisions) and the pages of the parts that changed, and search
+  `docs/` for the files the stage renamed or deleted.
 - `zensical build --strict` must report no issues.
 
 ## Show it to the owner

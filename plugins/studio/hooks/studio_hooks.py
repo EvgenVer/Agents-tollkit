@@ -10,13 +10,14 @@ session-start  Give the agent the `Now` section of docs/TASKS.md and reminders a
                picks up where work stopped. In an empty folder, point to the idea skill.
                Codex also gets its own rules here: Codex Desktop does not apply
                developer_instructions, and AGENTS.md is read by the other tools too.
-guard         Deny reading secrets and commands that destroy work. Ask the owner before
-               pushing to the main branch, installing software globally, touching files
-               outside the project and its extra folders, or changing which folders those
-               are. Codex and Antigravity hooks cannot ask, so there those are denied.
+guard         Deny reading secrets and commands that destroy work: force-pushes, discarding
+               uncommitted changes, disk commands, recursive deletes of the project or of
+               folders outside it. Ask the owner before a push to the main branch; Codex and
+               Antigravity hooks cannot ask, so there it is denied. Everything else, such as
+               files outside the project or global installs, is left to AGENTS.md and to
+               the tool's own permission mode or sandbox.
 stop           Before the agent stops, make sure work changed or committed in this session
-               is recorded in TASKS.md and that documentation pages about the changed,
-               deleted or renamed files are still true.
+               is recorded in TASKS.md.
 
 A failure inside a hook never blocks the agent: errors go to stderr and exit 0.
 """
@@ -55,10 +56,16 @@ Rules for Codex from the owner:
 - Narrowing `Project commands` in AGENTS.md: build or check the documentation only when a page
   other than `docs/TASKS.md` changed, and run the start-up check only when start-up code
   changed. Run both before each review and at the end of a stage.
+- Narrowing the tests in AGENTS.md: when the full run takes more than ten minutes, run the
+  tests that cover the change for each task, and the full run every three or four tasks and
+  at the end of the stage.
 - Replacing the review of each task that changes the data model, security, money or how parts
   communicate: have a fresh subagent review together the commits of the last three or four
   tasks or parts of a task, and before you build on a schema change that cannot be undone.
-  Each stage still gets its review at the end.
+  Each stage still gets its review at the end. A fix that tests cover needs no new review;
+  after fixing findings, ask the same reviewer to check just the fixes, at most twice. After
+  that, fix now only what would lose data or break security, and record the rest under
+  `Technical debt`.
 - Keeping a task finishable: before working on a task, make sure `docs/TASKS.md` says what
   closes it, as one result with a check that can pass; if it does not, write that first.
   Work beyond that result, or work that belongs to another task, becomes its own numbered
@@ -78,29 +85,12 @@ SECRET_NAME = re.compile(
 SAFE_SUFFIX = re.compile(r"\.(example|sample|template|dist)$", re.IGNORECASE)
 SECRET_DIRS = {".ssh", ".aws", ".azure", ".gnupg"}
 FILE_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit"}
-WRITE_TOOLS = FILE_TOOLS - {"Read"}
 SEARCH_TOOLS = {"Grep", "Glob"}
 SHELL_TOOLS = {"Bash", "PowerShell"}
 DELETE_COMMANDS = {"rm", "remove-item", "ri", "del", "erase", "rd", "rmdir"}
 POWERSHELL_FLAGS = {"-force", "-path", "-literalpath", "-include", "-exclude", "-filter",
                     "-whatif", "-confirm"}
 WHOLE_FOLDER_WILDCARDS = {"*", "*.*", ".*"}
-# Folders of the agents themselves: readable, and writable only where they keep notes.
-AGENT_DIRS = [".claude", ".codex", ".agents"]
-AGENT_NOTE_DIRS = [os.path.join(".claude", "projects"), os.path.join(".claude", "plans")]
-# Notes the Claude desktop app keeps for a side session, in its own data folder.
-SIDE_SESSION_NOTES = re.compile(r"[\\/]Claude-Data[\\/][^\\/]+[\\/]side-session-notes(?:[\\/]|$)",
-                                re.IGNORECASE)
-SYSTEM_INSTALLERS = {"winget", "choco", "scoop", "brew", "apt", "apt-get", "dnf", "yum",
-                     "pacman", "snap", "cargo", "go", "gem", "pipx"}
-# Shell commands that write files, and which argument names the destination.
-COPY_COMMANDS = {"cp", "copy", "copy-item", "cpi", "mv", "move", "move-item", "mi"}
-WRITE_COMMANDS = {"set-content", "sc", "add-content", "ac", "out-file", "new-item", "ni",
-                  "tee", "tee-object"}
-PATH_PARAMETERS = {"-path", "-literalpath", "-filepath", "-destination"}
-SWITCHES = POWERSHELL_FLAGS | {"-append", "-nonewline", "-noclobber", "-passthru"}
-NULL_TARGETS = {"/dev/null", "$null", "nul", "&1", "&2"}
-REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(\"[^\"]+\"|'[^']+'|[^\s;|&<>]+)")
 QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
 TOKEN = re.compile(r"[^\s'\"`;|&<>()=,]+")
 # Here-documents (<<EOF ... EOF) and PowerShell here-strings (@' ... '@) carry text or a
@@ -143,8 +133,6 @@ SETUP_ONLY = {".git", ".claude", ".codex", ".agents", ".vscode", ".idea"}
 # and the reminders stop already gave, so it does not repeat them.
 SESSIONS = Path(tempfile.gettempdir()) / "studio-hooks" / "sessions"
 SESSION_DAYS = 30
-# Pages that may name deleted files: the work log, finished stages and past decisions.
-HISTORY_PAGES = [TASKS, Path("docs") / "history", Path("docs") / "decisions"]
 
 DENY, ASK = "deny", "ask"
 
@@ -163,25 +151,8 @@ DELETE_OUTSIDE_REASON = (
     "This deletes folders outside the project, or the whole project. Delete specific "
     "paths inside the project instead, or ask the owner."
 )
-DELETE_FILE_REASON = "This deletes files outside the project folder; the owner decides."
-WRITE_OUTSIDE_REASON = (
-    "This file is outside the project folder; changing it needs the owner's approval. "
-    "Work inside the project when you can."
-)
-READ_OUTSIDE_REASON = (
-    "This path is outside the project folder; reading it needs the owner's approval. "
-    "Stay inside the project when you can."
-)
 PUSH_REASON = ("This pushes to the main branch, or to branches that cannot be told from the "
                "command; the owner decides. Pushing a working branch needs no approval.")
-SETTINGS_REASON = ("This file sets which folders and commands the agent may use; changing it "
-                   "needs the owner's approval.")
-INSTALL_REASON = (
-    "This installs software globally, outside the project. Install dependencies inside "
-    "the project instead: Python into .venv (.venv\\Scripts\\python -m pip install ... on "
-    "Windows, .venv/bin/python -m pip install ... elsewhere), JavaScript without -g. "
-    "If a global tool is really needed, the owner decides."
-)
 HOST_NAMES = {"codex": "Codex", "antigravity": "Antigravity"}
 ASK_PREFIX = ("Needs the owner's approval, and {} hooks cannot ask for it: tell the owner "
               "and let them run it themselves. ")
@@ -485,34 +456,6 @@ def scratch_dirs(payload):
     return dirs
 
 
-def settings_file(path, root):
-    """True for the project's Claude Code settings, which say what the agent may use."""
-    return path.parent == root / ".claude" and path.name.lower() in SETTINGS_FILES
-
-
-def agent_dirs(writing, payload):
-    home = Path.home()
-    dirs = [home / d for d in (AGENT_NOTE_DIRS if writing else AGENT_DIRS)]
-    if not writing:
-        dirs += [Path(os.environ[v]) for v in ("CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT")
-                 if os.environ.get(v)]
-        dirs += [Path(d) for d in payload.get("readable_dirs", [])]
-    return [d.resolve() for d in dirs]
-
-
-def outside_project(path, root, payload, writing):
-    """The reason to ask when a file tool reaches outside the project, or changes what the
-    agent may use, else None."""
-    if writing and settings_file(path, root):
-        return SETTINGS_REASON
-    if is_inside(path, Path.home().resolve()) and SIDE_SESSION_NOTES.search(str(path)):
-        return None
-    allowed = [root, *scratch_dirs(payload), *agent_dirs(writing, payload)]
-    if any(is_inside(path, folder) for folder in allowed):
-        return None
-    return WRITE_OUTSIDE_REASON if writing else READ_OUTSIDE_REASON
-
-
 def command_segments(command):
     """The parts of a command line between ;, |, &&, || and line breaks outside quotes.
     With unbalanced quotes, such as an apostrophe in plain text, split everywhere."""
@@ -754,9 +697,11 @@ def deletion_risk(segment, cwd, root, payload):
     if parsed is None:
         return None
     targets, recursive = parsed
-    outside = (DENY, DELETE_OUTSIDE_REASON) if recursive else (ASK, DELETE_FILE_REASON)
+    if not recursive:
+        return None  # single files are the agent's to judge; AGENTS.md says when to ask
+    outside = (DENY, DELETE_OUTSIDE_REASON)
     if not targets:
-        return outside if recursive else None
+        return outside
     scratch = scratch_dirs(payload)
     for target in targets:
         if target.startswith(("~", "$", "%")):
@@ -766,91 +711,14 @@ def deletion_risk(segment, cwd, root, payload):
             candidate = Path(cwd) / candidate
         wildcard = any(ch in candidate.name for ch in "*?[")
         resolved = (candidate.parent if wildcard else candidate).resolve()
-        if recursive and is_inside(root, resolved) and (
+        if is_inside(root, resolved) and (
                 resolved != root or not wildcard or candidate.name in WHOLE_FOLDER_WILDCARDS):
             return outside  # the project itself, or a folder that contains it
-        if any(is_inside(resolved, folder) and (resolved != folder or wildcard and not recursive)
-               for folder in scratch):
+        if any(is_inside(resolved, folder) and resolved != folder for folder in scratch):
             continue  # files in the temporary or an extra folder, not the folder itself
         if not is_inside(resolved, root):
             return outside
     return None
-
-
-def write_targets(segment):
-    """Destinations a shell segment writes to: copies, moves, file writers, redirects.
-    A > inside quoted text, such as an e-mail address in a commit message, is text."""
-    unquoted = QUOTED.sub(
-        lambda match: match.group() if re.search(r">\s*$", segment[:match.start()]) else "''",
-        segment)
-    targets = [match.strip("'\"") for match in REDIRECT.findall(unquoted)]
-    words = command_words(segment)
-    name = Path(words[0]).stem.lower() if words else ""
-    if name in COPY_COMMANDS or name in WRITE_COMMANDS:
-        args, positional, named = words[1:], [], []
-        index = 0
-        while index < len(args):
-            word, lowered = args[index], args[index].lower()
-            index += 1
-            if lowered in PATH_PARAMETERS and index < len(args):
-                named.append(args[index])
-                index += 1
-            elif word.startswith("-"):
-                # A PowerShell parameter such as -Value or -Encoding takes the next word.
-                if name in WRITE_COMMANDS and name != "tee" and lowered not in SWITCHES:
-                    index += 1
-            else:
-                positional.append(word)
-        if named:
-            targets.append(named[-1])
-        elif positional:
-            targets += positional if name == "tee" else (
-                [positional[-1]] if name in COPY_COMMANDS else [positional[0]])
-    return [t for t in targets if t.lower() not in NULL_TARGETS and not t.startswith(("$", "%"))]
-
-
-def environment_python(program):
-    """True for the Python or pip of a virtual environment: a relative .../Scripts/python
-    or .../bin/python, or an absolute one next to the environment's pyvenv.cfg."""
-    if not re.search(r"[\\/](scripts|bin)[\\/](python|pip)[\d.]*(\.exe)?$", program, re.I):
-        return False
-    path = Path(native_path(program))
-    absolute = path.is_absolute() or str(program).startswith(("/", "\\"))
-    return not absolute or exists(path.parent.parent / "pyvenv.cfg")
-
-
-def global_install(segment, venv_active):
-    original = command_words(strip_prose(segment))
-    if original and original[0] == "sudo":
-        original = original[1:]
-    words = [w.lower() for w in original]
-    if not words:
-        return False
-    tool, rest = Path(words[0]).stem, words[1:]
-    options = set(rest)
-    if tool in {"npm", "pnpm", "bun"}:
-        return bool(options & {"install", "i", "add", "link"}) and bool(options & {"-g", "--global"})
-    if tool == "yarn":
-        return rest[:2] == ["global", "add"]
-    if tool in SYSTEM_INSTALLERS:
-        return "install" in rest
-    if tool == "uv":
-        return rest[:2] == ["tool", "install"] or (rest[:2] == ["pip", "install"]
-                                                    and "--system" in options)
-    if tool == "dotnet":
-        return rest[:2] == ["tool", "install"] and bool(options & {"-g", "--global"})
-    if tool == "install-module":
-        return True
-    uses_pip = tool in {"pip", "pip3"} or (
-        (tool.startswith("python") or tool == "py") and "-m" in rest and "pip" in rest)
-    if not uses_pip or "install" not in rest:
-        return False
-    if "--user" in options:
-        return True
-    in_venv = (venv_active or re.search(r"(^|[\\/])\.?venv[\\/]", words[0])
-               or environment_python(original[0]))
-    explicit_target = bool(options & {"--target", "-t", "--prefix"})
-    return not (in_venv or explicit_target)
 
 
 def branch_name(ref):
@@ -925,7 +793,7 @@ def pushes_working_branches(segment, cwd):
                                       for name in branches)
 
 
-def segment_decision(segment, cwd, root, payload, venv_active):
+def segment_decision(segment, cwd, root, payload):
     prose_free = strip_prose(GIT_GLOBAL_OPTIONS.sub("git", segment))
     for pattern, reason in DESTRUCTIVE_PATTERNS:
         if pattern.search(prose_free):
@@ -933,14 +801,8 @@ def segment_decision(segment, cwd, root, payload, venv_active):
     risk = deletion_risk(segment, cwd, root, payload)
     if risk:
         return risk
-    for target in write_targets(segment):
-        reason = outside_project(resolve_path(target, cwd), root, payload, True)
-        if reason:
-            return ASK, reason
     if PUSH_PATTERN.search(prose_free) and not pushes_working_branches(segment, cwd):
         return ASK, PUSH_REASON
-    if global_install(segment, venv_active):
-        return ASK, INSTALL_REASON
     return None
 
 
@@ -953,11 +815,8 @@ def shell_decision(command, cwd, root, payload):
     # text of a commit message only mentions one.
     if any(reader != "git" and names_secret_file(body, cwd) for body, reader in documents):
         return DENY, SECRET_REASON
-    results, venv_active = [], False
-    for segment, where in located:
-        results.append(segment_decision(segment, where, root, payload, venv_active))
-        venv_active = venv_active or "activate" in strip_prose(segment).lower()
-    return strongest(results)
+    return strongest(segment_decision(segment, where, root, payload)
+                     for segment, where in located)
 
 
 def guard_decision(payload):
@@ -977,20 +836,13 @@ def guard_decision(payload):
         path = resolve_path(value, cwd)
         if is_secret_path(value) and not (tool == "Write" and not path.exists()):
             return DENY, SECRET_REASON  # creating a new file reveals nothing
-        reason = outside_project(path, root, payload, tool in WRITE_TOOLS)
-        return (ASK, reason) if reason else None
+        return None
     if tool in SEARCH_TOOLS:
         value = tool_input.get("path")
         pattern = tool_input.get("glob") if tool == "Grep" else tool_input.get("pattern")
         if is_secret_path(value) or is_secret_path(pattern):
             return DENY, SECRET_REASON
-        base = value
-        if not base and tool == "Glob" and pattern and Path(native_path(pattern)).is_absolute():
-            base = re.split(r"[*?\[{]", native_path(pattern))[0] or None
-        if not base:
-            return None
-        reason = outside_project(resolve_path(base, cwd), root, payload, False)
-        return (ASK, reason) if reason else None
+        return None
 
     command = tool_input.get("command")
     if isinstance(command, list):
@@ -1002,10 +854,6 @@ def guard_decision(payload):
                            command, re.MULTILINE)
         if any(kind in ("Update File", "Delete File") and is_secret_path(f) for kind, f in files):
             return DENY, SECRET_REASON
-        for _, value in files:
-            reason = outside_project(resolve_path(value.strip(), cwd), root, payload, True)
-            if reason:
-                return ASK, reason
         return None
     if tool not in SHELL_TOOLS:
         return None
@@ -1035,68 +883,6 @@ def guard(payload, host="claude"):
 
 # --- stop ----------------------------------------------------------------------------
 
-def project_files(root, paths, kept):
-    """{path relative to the project: path} for files outside docs/ that exist (kept) or
-    no longer exist (not kept)."""
-    root = root.resolve()
-    docs = root / "docs"
-    found = {}
-    for path in paths:
-        path = path.resolve()
-        if path.is_file() == kept and is_inside(path, root) and not is_inside(path, docs):
-            found[path.relative_to(root).as_posix()] = path
-    return found
-
-
-def doc_pages(root, skip):
-    docs = (root / "docs").resolve()
-    skip = [(root / s).resolve() for s in skip]
-    pages = sorted(docs.rglob("*.md")) if docs.is_dir() else []
-    return [page.resolve() for page in pages
-            if not any(page.resolve() == s or is_inside(page.resolve(), s) for s in skip)]
-
-
-def page_hits(root, pages, mentioned):
-    """(page, files) for each page that mentions one of the files `mentioned` picks."""
-    found = []
-    for page in pages:
-        hits = mentioned(page, read_text(page))
-        if hits:
-            found.append((page.relative_to(root.resolve()).as_posix(), hits))
-    return found
-
-
-def untold(hits, told):
-    """'page (file, ...)' for the page and file pairs not mentioned yet; notes them."""
-    found = []
-    for page, files in hits:
-        new = [name for name in files if f"{page}|{name}" not in told]
-        told.update(f"{page}|{name}" for name in new)
-        if new:
-            found.append(f"{page} ({', '.join(new[:3])})")
-    return found
-
-
-def stale_pages(root, changed):
-    """Documentation pages that mention changed files and are older than them."""
-    sources = {rel: path.stat().st_mtime
-               for rel, path in project_files(root, changed, True).items()}
-    if not sources:
-        return []
-    return page_hits(root, doc_pages(root, [TASKS, Path("docs") / "history"]),
-                     lambda page, text: [rel for rel, changed_at in sources.items()
-                                         if changed_at > page.stat().st_mtime and rel in text])
-
-
-def pages_about_removed(root, removed):
-    """Documentation pages that still mention deleted or renamed files."""
-    gone = project_files(root, removed, False)
-    if not gone:
-        return []
-    return page_hits(root, doc_pages(root, HISTORY_PAGES),
-                     lambda page, text: [rel for rel in gone if rel in text])
-
-
 def stop_reason(cwd, session=""):
     """Why the agent should not stop yet, or None. With a session id each reminder is
     given once: a later stop mentions only what changed since."""
@@ -1107,7 +893,6 @@ def stop_reason(cwd, session=""):
         return None
     tasks = tasks.resolve()
     notes = load_session(session, top) if session else {}
-    told = set(notes.get("told", []))
     changed, removed = uncommitted(top)
     since = notes.get("head")
     committed, committed_removed = committed_since(top, since) if since else ([], [])
@@ -1132,20 +917,8 @@ def stop_reason(cwd, session=""):
                 "session, but docs/TASKS.md was not updated. Record the evidence of the "
                 "finished work there, or update the Now section with the next step, and "
                 "commit it.")
-    pages = untold(stale_pages(root, changed + committed), told)
-    if pages:
-        reasons.append(
-            "These documentation pages mention files you changed after the page was last "
-            f"edited: {'; '.join(pages[:5])}. Check that they still describe the code, and "
-            "update them if they do not.")
-    gone = untold(pages_about_removed(root, removed + committed_removed), told)
-    if gone:
-        reasons.append(
-            "These documentation pages mention files that were deleted or renamed: "
-            f"{'; '.join(gone[:5])}. Point them to the current files, or remove what no "
-            "longer exists.")
     if session and reasons:
-        save_session(session, top, {**notes, "told": sorted(told)})
+        save_session(session, top, notes)
     return "Before you stop: " + " ".join(reasons) if reasons else None
 
 
@@ -1185,10 +958,6 @@ def stop(payload, host="claude"):
 # write_to_file, replace_file_content, ...). Each call is translated into the Claude Code
 # calls that guard_decision checks; tools without paths or commands pass.
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-# Antigravity's own folders: settings, plugins, skills and conversation artifacts.
-GEMINI_DIRS = [os.path.join(".gemini", d)
-               for d in ("config", "antigravity", "antigravity-ide", "antigravity-cli")]
 FILE_ARGS = ("AbsolutePath", "Path", "TargetFile", "FilePath", "File")
 FOLDER_ARGS = ("DirectoryPath", "SearchPath", "SearchDirectory", "Directory",
                "TargetDirectories")
@@ -1217,8 +986,7 @@ def antigravity_calls(payload):
     name, args = str(call.get("name", "")), call.get("args") or {}
     context = {"cwd": args.get("Cwd") or antigravity_cwd(payload),
                "scratchpad_dir": payload.get("artifactDirectoryPath"),
-               "workspace_dirs": strings(payload.get("workspacePaths")),
-               "readable_dirs": [PLUGIN_ROOT, *(Path.home() / d for d in GEMINI_DIRS)]}
+               "workspace_dirs": strings(payload.get("workspacePaths"))}
 
     def claude(tool, **tool_input):
         return {**context, "tool_name": tool, "tool_input": tool_input}

@@ -228,10 +228,9 @@ class Deleting(ProjectCase):
             f"rm -r -f {Path.home() / 'other'}", "Remove-Item -Recurse -Force C:\\Users",
             "rd /s /q ..", "rm -rf"])
 
-    def test_deleting_files_outside_needs_the_owner(self):
-        self.assertDecision("ask", "Bash", [f"rm {OUTSIDE}", f"del {OUTSIDE}",
-                                            "rm ~/notes.txt"])
-        self.assertDecision("ask", "PowerShell", [f"Remove-Item -Force {OUTSIDE}"])
+    def test_deleting_single_files_is_left_to_the_agent(self):
+        self.assertDecision(None, "Bash", [f"rm {OUTSIDE}", f"del {OUTSIDE}", "rm ~/notes.txt"])
+        self.assertDecision(None, "PowerShell", [f"Remove-Item -Force {OUTSIDE}"])
 
     def test_deleting_inside_the_project_is_allowed(self):
         self.assertDecision(None, "Bash", [
@@ -239,80 +238,18 @@ class Deleting(ProjectCase):
             "Remove-Item -Recurse -Force .\\dist", "rd /s /q build", "rm -Force app.py",
             f"rm -rf {tempfile.gettempdir()}/scratch-x"])
 
-
-class OutsideFiles(ProjectCase):
-    def test_files_outside_the_project_need_the_owner(self):
-        for tool in ["Read", "Write", "Edit"]:
-            self.assertEqual(self.decision(tool, file_path=str(OUTSIDE)), "ask", tool)
-        self.assertEqual(self.decision("Grep", pattern="x", path=str(OUTSIDE.parent)), "ask")
-        self.assertEqual(self.decision("Glob", pattern=f"{OUTSIDE.parent.as_posix()}/**/*.pdf"),
-                         "ask")
-        claude_settings = Path.home() / ".claude" / "settings.json"
-        self.assertEqual(self.decision("Write", file_path=str(claude_settings)), "ask")
-
-    def test_shell_and_patch_writes_outside_need_the_owner(self):
-        self.assertDecision("ask", "Bash", [
-            f"cp app.py {OUTSIDE}", f"mv app.py {OUTSIDE}", f"echo hi > {OUTSIDE}",
-            f"npm test >> {OUTSIDE}", f"cat app.py | tee {OUTSIDE}"])
-        self.assertDecision("ask", "PowerShell", [
-            f"Set-Content {OUTSIDE} -Value 1", f"Set-Content -Value 1 -Path {OUTSIDE}",
-            f"Get-Process | Out-File {OUTSIDE}", f"Copy-Item app.py -Destination {OUTSIDE}"])
-        patch = f"*** Begin Patch\n*** Add File: {OUTSIDE}\n+test\n*** End Patch"
-        self.assertEqual(self.decision("apply_patch", command=patch), "ask")
-
-    def test_shell_and_patch_writes_inside_are_allowed(self):
-        self.assertDecision(None, "Bash", [
-            "cp app.py backup.py", "mv app.py src/app.py", "npm test > out.log 2>&1",
-            "python app.py > /dev/null", "cat app.py | tee copy.py",
-            f"cp app.py {tempfile.gettempdir()}/copy.py"])
-        self.assertDecision(None, "PowerShell", [
-            "Set-Content notes.txt -Value 'a b'", "Get-Process | Out-File procs.txt",
-            "Copy-Item app.py -Destination .\\dist", "npm test > $null",
-            "New-Item -ItemType Directory -Path src"])
-        patch = "*** Begin Patch\n*** Add File: src/new.py\n+x = 1\n*** End Patch"
-        self.assertIsNone(self.decision("apply_patch", command=patch))
-
-    def test_a_greater_than_sign_in_text_is_not_a_redirect(self):
-        self.assertDecision(None, "Bash", [
-            "printf 'Fix it\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\n' > msg.txt",
-            'git commit -m "Fix it <noreply@anthropic.com>"',
-            "git commit -F - <<'EOF'\nFix it\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF",
-            "uv run python - <<'PYEOF'\nif len(modes) > 1:\n    pass\ndef f(x) -> R:\n"
-            "    return x\nPYEOF",
-            "cat > notes.md <<'EOF'\nThe log goes to `<Work>/<name>_01.txt`.\nEOF"])
-        self.assertDecision(None, "PowerShell", [
-            "@'\nif a > 1:\n    s = '<a id=\"x\"></a>'\n'@ | .\\.venv\\Scripts\\python.exe -"])
-        # Real redirects, also inside a here-document a shell runs, are still checked.
-        self.assertDecision("ask", "Bash", [
-            f"printf 'Fix it <a@b.c>' > {OUTSIDE}", f"cat > {OUTSIDE} <<'EOF'\nhi\nEOF",
-            f"bash <<'EOF'\necho hi > {OUTSIDE}\nEOF"])
-
     def test_a_change_of_folder_is_followed(self):
         documents = OUTSIDE.parent
-        self.assertDecision("ask", "PowerShell", [
-            f'cd "{documents}"; Set-Content notes.txt -Value 1',
-            f"Set-Location -Path {documents}; Get-Process | Out-File procs.txt",
-            f"pushd {documents} && echo hi > x.txt"])
-        self.assertDecision(None, "PowerShell", [
-            "cd src; Set-Content notes.txt -Value 1",
-            f"pushd {documents}; popd; Set-Content notes.txt -Value 1"])
         self.assertDecision("deny", "Bash", ["cd .. && rm -rf project",
                                              f"cd {documents} && rm -rf ."])
+        self.assertDecision(None, "Bash", ["cd src && rm -rf build",
+                                           f"pushd {documents}; popd; rm -rf build"])
 
     def test_variables_set_in_the_command_are_followed(self):
-        work = Path(tempfile.gettempdir()) / "studio-hook-wt"
         documents = OUTSIDE.parent
-        self.assertDecision(None, "Bash", [
-            f'W="{work.as_posix()}"; cd "$W" && node setup.mjs > ../setup.log 2>&1',
-            f'W="{work.as_posix()}"; cat >> "$W/notes.txt" <<\'EOF\'\nx\nEOF',
-            "O=build/out; rm -f \"$O\"/*.png \"$O\"/mosaics/*.png",
-            f'D="{documents.as_posix()}"; D=$(pwd); cd "$D" && echo hi > x.txt'])
-        self.assertDecision(None, "PowerShell", ["$S = 'src'; Set-Content \"$S\\notes.txt\" -Value 1"])
-        self.assertDecision("ask", "Bash", [
-            'rm -f "$O"/*.png', f'D="{documents.as_posix()}"; cd "$D" && echo hi > x.txt',
-            f'D="{documents.as_posix()}"; rm "${{D}}/notes.txt"'])
-        self.assertDecision("ask", "PowerShell", [
-            f"$S = '{documents}'; Set-Content \"$S\\notes.txt\" -Value 1"])
+        self.assertDecision(None, "Bash", ['O=build/out; rm -rf "$O"/mosaics'])
+        self.assertDecision("deny", "Bash", [
+            'rm -rf "$O"/mosaics', f'D="{documents.as_posix()}"; rm -rf "$D/old"'])
 
     def test_a_clone_inside_the_project_is_still_the_project(self):
         clone = self.root / "runtime" / "lib-src"
@@ -320,43 +257,52 @@ class OutsideFiles(ProjectCase):
         git(clone, "init", "-q")
         os.environ["CLAUDE_PROJECT_DIR"] = str(self.root)
         self.addCleanup(os.environ.pop, "CLAUDE_PROJECT_DIR", None)
-        for tool, path in [("Edit", self.root / "app.py"), ("Write", clone / "x.py")]:
-            result = hooks.guard_decision({"tool_name": tool, "cwd": str(clone),
-                                           "tool_input": {"file_path": str(path)}})
-            self.assertIsNone(result, (tool, path))
-        result = hooks.guard_decision({"tool_name": "Write", "cwd": str(clone),
-                                       "tool_input": {"file_path": str(OUTSIDE)}})
-        self.assertEqual(result[0], "ask")
 
-    def test_project_temp_and_agent_folders_are_allowed(self):
-        notes = Path.home() / ".claude" / "projects" / "demo" / "memory" / "note.md"
-        for tool, path in [("Read", self.root / "app.py"), ("Write", "src/new.py"),
-                           ("Read", Path(tempfile.gettempdir()) / "x.txt"),
-                           ("Read", Path.home() / ".claude" / "settings.json"),
-                           ("Write", notes)]:
-            self.assertIsNone(self.decision(tool, file_path=str(path)), (tool, path))
-        self.assertIsNone(self.decision("Grep", pattern="x"))
-        self.assertIsNone(self.decision("Glob", pattern="**/*.py"))
+        def decide(command):
+            result = hooks.guard_decision({"tool_name": "Bash", "cwd": str(clone),
+                                           "tool_input": {"command": command}})
+            return result[0] if result else None
 
-    def test_side_session_notes_of_the_desktop_app_are_allowed(self):
-        data = Path.home() / "AppData" / "Local" / "Claude-Data" / "claude_abc"
-        notes = data / "side-session-notes" / "local_123" / "t53-progress.md"
-        for tool in ["Read", "Write", "Edit"]:
-            self.assertIsNone(self.decision(tool, file_path=str(notes)), tool)
-        self.assertDecision(None, "Bash", [f'echo done >> "{notes}"'])
-        # Elsewhere in the app's data folder is still outside.
-        self.assertEqual(self.decision("Write", file_path=str(data / "config.json")), "ask")
+        self.assertIsNone(decide("rm -rf build"))
+        self.assertIsNone(decide(f'rm -rf "{self.root / "dist"}"'))
+        self.assertEqual(decide("rm -rf ../.."), "deny")
 
     @unittest.skipUnless(os.name == "nt", "Git Bash paths exist on Windows only")
     def test_git_bash_tmp_is_the_temporary_folder(self):
-        self.assertDecision(None, "Bash", [
-            "python app.py > /tmp/out.txt", "cp app.py /tmp/copy.py", "rm -rf /tmp/scratch-x",
-            "cat app.py | tee /tmp/copy.py", "cd /tmp && echo hi > out.txt"])
-        for tool in ["Read", "Write"]:
-            self.assertIsNone(self.decision(tool, file_path="/tmp/out.txt"), tool)
+        self.assertDecision(None, "Bash", ["rm -rf /tmp/scratch-x"])
         # The temporary folder as a whole stays protected, and a similar name is not it.
-        self.assertDecision("deny", "Bash", ["rm -rf /tmp", "rm -rf /tmp/*"])
-        self.assertDecision("ask", "Bash", ["cp app.py /tmpfiles/copy.py"])
+        self.assertDecision("deny", "Bash", ["rm -rf /tmp", "rm -rf /tmp/*",
+                                             "rm -rf /tmpfiles/copy"])
+
+
+class LeftToTheAgent(ProjectCase):
+    """What the guard no longer asks about: AGENTS.md says when the owner decides, and the
+    tool's own permission mode or sandbox enforces it."""
+
+    def test_files_outside_the_project(self):
+        for tool in ["Read", "Write", "Edit"]:
+            self.assertIsNone(self.decision(tool, file_path=str(OUTSIDE)), tool)
+        self.assertIsNone(self.decision("Grep", pattern="x", path=str(OUTSIDE.parent)))
+        self.assertIsNone(self.decision("Glob", pattern=f"{OUTSIDE.parent.as_posix()}/**/*.pdf"))
+        self.assertDecision(None, "Bash", [
+            f"cp app.py {OUTSIDE}", f"echo hi > {OUTSIDE}", f"cat app.py | tee {OUTSIDE}"])
+        self.assertDecision(None, "PowerShell", [f"Set-Content {OUTSIDE} -Value 1"])
+        patch = f"*** Begin Patch\n*** Add File: {OUTSIDE}\n+test\n*** End Patch"
+        self.assertIsNone(self.decision("apply_patch", command=patch))
+
+    def test_installs_and_settings(self):
+        self.assertDecision(None, "Bash", [
+            "npm install -g typescript", "pip install requests", "winget install Git.Git",
+            "npm install express", ".venv/bin/pip install -r requirements.txt"])
+        settings = self.root / ".claude" / "settings.json"
+        self.assertIsNone(self.decision("Edit", file_path=str(settings)))
+
+    def test_text_that_looks_like_a_command_is_text(self):
+        self.assertDecision(None, "Bash", [
+            'git commit -m "Fix it <noreply@anthropic.com>"',
+            "git commit -F - <<'EOF'\nNever run git reset --hard here\nEOF",
+            "cat > notes.md <<'EOF'\nDo not run rm -rf / on the server.\nEOF",
+            'echo "git push --force is forbidden"'])
 
 
 class ExtraFolders(ProjectCase):
@@ -369,57 +315,16 @@ class ExtraFolders(ProjectCase):
 
     def test_folders_from_claude_settings_are_like_the_temp_folder(self):
         extra = self.EXTRA
-        self.assertEqual(self.decision("Write", file_path=str(extra / "a.txt")), "ask")
+        self.assertDecision("deny", "Bash", [f'rm -rf "{extra}/Work/tmp"'])
         self.allow(extra, name="settings.json")
-        for tool in ["Read", "Write", "Edit"]:
-            self.assertIsNone(self.decision(tool, file_path=str(extra / "Work" / "a.txt")), tool)
         self.assertDecision(None, "Bash", [
-            f'echo hi > "{extra}/out.txt"', f'rm "{extra}/Work/a.frame"',
-            f'rm -f "{extra.as_posix()}/Work"/*.frame', f'rm "{extra}"/*.txt',
-            f'rm -rf "{extra}/Work/tmp"', f'cd "{extra}" && rm -v Data/a.txt Work/b.ald'])
-        # The folder itself, everything in it, and other folders stay protected.
+            f'rm -rf "{extra}/Work/tmp"', f'cd "{extra}" && rm -rf Data/old'])
+        # The folder itself and everything in it stay protected.
         self.assertDecision("deny", "Bash", [f'rm -rf "{extra}"', f'rm -rf "{extra}"/*'])
-        self.assertDecision("ask", "Bash", [f"echo hi > {OUTSIDE}"])
 
     def test_a_whole_drive_does_not_count(self):
         self.allow(Path(OUTSIDE.anchor))
-        self.assertEqual(self.decision("Write", file_path=str(OUTSIDE)), "ask")
-
-    def test_changing_the_settings_needs_the_owner(self):
-        self.allow(self.EXTRA)
-        for name in ["settings.json", "settings.local.json"]:
-            path = self.root / ".claude" / name
-            self.assertEqual(self.decision("Edit", file_path=str(path)), "ask", name)
-            self.assertIsNone(self.decision("Read", file_path=str(path)), name)
-        self.assertDecision("ask", "Bash", ["echo {} > .claude/settings.json"])
-
-
-class Installs(ProjectCase):
-    def test_global_installs_need_the_owner(self):
-        self.assertDecision("ask", "Bash", [
-            "npm install -g typescript", "npm i --global pnpm", "pip install requests",
-            "python -m pip install -r requirements.txt", "pip install --user httpx",
-            "winget install Git.Git", "uv tool install ruff", "cargo install ripgrep",
-            "yarn global add serve", "uv pip install --system httpx"])
-        self.assertDecision("ask", "PowerShell", ["Install-Module PSReadLine"])
-
-    def test_project_installs_are_allowed(self):
-        self.assertDecision(None, "Bash", [
-            "npm install express", "npm ci", ".venv\\Scripts\\python -m pip install requests",
-            ".venv/bin/pip install -r requirements.txt", "uv pip install httpx", "uv add httpx",
-            "source .venv/bin/activate && pip install httpx",
-            'git commit -m "document npm install -g usage"'])
-        self.assertDecision(None, "PowerShell", [".venv\\Scripts\\activate; pip install requests"])
-
-    def test_any_virtual_environment_counts(self):
-        self.assertDecision(None, "Bash", [
-            "python -m venv tlvenv && ./tlvenv/Scripts/python -m pip install -q comtypes",
-            "tools/bin/pip install httpx"])
-        python = self.root.parent / "py" / "Scripts" / "python.exe"
-        self.assertDecision("ask", "Bash", [f'"{python}" -m pip install httpx'])
-        (self.root.parent / "py" / "pyvenv.cfg").parent.mkdir(parents=True)
-        (self.root.parent / "py" / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
-        self.assertDecision(None, "Bash", [f'"{python}" -m pip install httpx'])
+        self.assertDecision("deny", "Bash", [f'rm -rf "{OUTSIDE.parent / "old"}"'])
 
 
 class GuardOutput(ProjectCase):
@@ -537,21 +442,6 @@ class Stop(ProjectCase):
         set_mtime(self.root / "docs" / "TASKS.md", 5)
         self.assertIsNone(self.stop())
 
-    def test_pages_about_changed_code_must_be_checked(self):
-        page = self.root / "docs" / "components" / "app.md"
-        page.parent.mkdir()
-        page.write_text("# App\n\nThe entry point is `app.py`.\n", encoding="utf-8")
-        git(self.root, "add", ".")
-        git(self.root, "commit", "-q", "-m", "docs")
-        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
-        set_mtime(self.root / "app.py", 5)
-        set_mtime(self.root / "docs" / "TASKS.md", 10)
-        reason = self.stop()["reason"]
-        self.assertIn("docs/components/app.md (app.py)", reason)
-        self.assertNotIn("newer than docs/TASKS.md", reason)
-        set_mtime(page, 20)
-        self.assertIsNone(self.stop())
-
     def test_other_projects_are_ignored(self):
         os.remove(self.root / "docs" / "TASKS.md")
         (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
@@ -583,54 +473,23 @@ class Stop(ProjectCase):
         self.commit("record")
         self.assertIsNone(self.stop(session_id=session))
 
-    def test_pages_about_committed_and_deleted_files_must_be_checked(self):
-        (self.root / "old.py").write_text("x = 1\n", encoding="utf-8")
-        page = self.root / "docs" / "components" / "app.md"
-        decision = self.root / "docs" / "decisions" / "0001-old.md"
-        for path, text in [(page, "`app.py` calls `old.py`."), (decision, "We kept `old.py`.")]:
-            path.parent.mkdir(parents=True)
-            path.write_text(text + "\n", encoding="utf-8")
-        git(self.root, "add", ".")
-        self.commit("docs")
-        session = str(uuid.uuid4())
-        self.start(session)
-        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
-        set_mtime(self.root / "app.py", 5)
-        git(self.root, "rm", "-q", "old.py")
-        with open(self.root / "docs" / "TASKS.md", "a", encoding="utf-8") as tasks:
-            tasks.write("- [x] T2 Save a book — check: click save — done\n")
-        self.commit("work")
-        reason = self.stop(session_id=session)["reason"]
-        self.assertIn("docs/components/app.md (app.py)", reason)
-        self.assertIn("deleted or renamed: docs/components/app.md (old.py)", reason)
-        self.assertNotIn("0001-old.md", reason)  # past decisions may name old files
-        self.assertNotIn("not updated", reason)
-        page.write_text("`app.py` does the work.\n", encoding="utf-8")
-        set_mtime(page, 20)
-        self.commit("update the page")
-        self.assertIsNone(self.stop(session_id=session))
-
     def test_a_session_hears_each_reminder_once(self):
-        page = self.root / "docs" / "components" / "app.md"
-        page.parent.mkdir()
-        page.write_text("`app.py` uses `util.py`.\n", encoding="utf-8")
         (self.root / "util.py").write_text("x = 1\n", encoding="utf-8")
         git(self.root, "add", ".")
-        self.commit("docs")
+        self.commit("add util")
         session = str(uuid.uuid4())
         self.start(session)
         (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8")
         set_mtime(self.root / "app.py", 5)
         reason = self.stop(session_id=session)["reason"]
         self.assertIn("newer than docs/TASKS.md", reason)
-        self.assertIn("docs/components/app.md (app.py)", reason)
+        self.assertNotIn("documentation pages", reason)  # pages are checked at stage end
         self.assertIsNone(self.stop(session_id=session))
         self.assertEqual(self.stop()["decision"], "block")  # without a session id, always
         (self.root / "util.py").write_text("x = 2\n", encoding="utf-8")
         set_mtime(self.root / "util.py", 10)
         reason = self.stop(session_id=session)["reason"]
         self.assertIn("newer than docs/TASKS.md", reason)  # a newer change is new news
-        self.assertIn("docs/components/app.md (util.py)", reason)
 
     def test_untracked_files_in_hidden_folders_are_not_work(self):
         artifact = self.root / ".artifacts" / "run-1" / "result.json"
@@ -662,16 +521,6 @@ class Stop(ProjectCase):
         claude = Path(self.tmp.name) / "claude.jsonl"
         claude.write_text('{"type": "user", "message": {}}\n', encoding="utf-8")
         self.assertEqual(self.stop(transcript_path=str(claude))["decision"], "block")
-
-    def test_pages_about_uncommitted_deletions_must_be_checked(self):
-        page = self.root / "docs" / "components" / "app.md"
-        page.parent.mkdir()
-        page.write_text("The entry point is `app.py`.\n", encoding="utf-8")
-        git(self.root, "add", ".")
-        self.commit("docs")
-        os.remove(self.root / "app.py")
-        self.assertIn("deleted or renamed: docs/components/app.md (app.py)",
-                      self.stop()["reason"])
 
 
 class Robustness(unittest.TestCase):
@@ -735,14 +584,11 @@ class Antigravity(ProjectCase):
                 if tool not in ("SessionStart", "Stop"):
                     self.assertIsNone(self.verdict(surface, tool), (surface, tool))
 
-    def test_files_outside_the_project_need_the_owner(self):
+    def test_files_outside_the_project_are_left_to_the_agent(self):
         for tool in ["read_file", "write_file", "edit_file"]:
-            self.assertEqual(self.verdict("app", tool, Path=OUTSIDE), "ask", tool)
-        self.assertEqual(self.verdict("ide", "view_file", AbsolutePath=OUTSIDE), "ask")
-        self.assertEqual(self.verdict("ide", "list_dir", DirectoryPath=OUTSIDE.parent), "ask")
-        self.assertEqual(self.verdict("ide", "grep_search", SearchPath=OUTSIDE.parent), "ask")
-        for tool in ["write_to_file", "replace_file_content"]:
-            self.assertEqual(self.verdict("ide", tool, TargetFile=OUTSIDE), "ask", tool)
+            self.assertIsNone(self.verdict("app", tool, Path=OUTSIDE), tool)
+        self.assertIsNone(self.verdict("ide", "list_dir", DirectoryPath=OUTSIDE.parent))
+        self.assertIsNone(self.verdict("ide", "write_to_file", TargetFile=OUTSIDE))
 
     def test_secrets_are_denied(self):
         secret = self.root / ".env"
@@ -759,36 +605,23 @@ class Antigravity(ProjectCase):
 
     def test_commands(self):
         self.assertEqual(self.verdict("app", "run_command", CommandLine="git push"), "ask")
-        self.assertEqual(self.verdict("ide", "run_command", CommandLine="npm i -g pnpm"), "ask")
+        self.assertIsNone(self.verdict("ide", "run_command", CommandLine="npm i -g pnpm"))
         self.assertEqual(self.verdict("ide", "run_command", CommandLine="git reset --hard"),
                          "deny")
         self.assertEqual(self.verdict("ide", "run_command", Cwd=self.root / "docs",
                                       CommandLine="Remove-Item -Recurse -Force .."), "deny")
-        self.assertEqual(self.verdict("app", "run_command",
-                                      CommandLine=f"Set-Content {OUTSIDE} -Value 1"), "ask")
+        self.assertIsNone(self.verdict("app", "run_command",
+                                       CommandLine=f"Set-Content {OUTSIDE} -Value 1"))
         self.assertIsNone(self.verdict("app", "run_command", CommandLine="git status"))
 
     def test_unrecorded_tools(self):
         (self.root / ".env").write_text("TOKEN=x\n", encoding="utf-8")
         self.assertEqual(self.call("find_by_name", SearchDirectory=str(self.root),
                                    Pattern=".env"), "deny")
-        self.assertEqual(self.call("multi_replace_file_content", TargetFile=str(OUTSIDE)),
-                         "ask")
-        self.assertEqual(self.call("codebase_search", Query="x",
-                                   TargetDirectories=[str(OUTSIDE.parent)]), "ask")
+        self.assertIsNone(self.call("multi_replace_file_content", TargetFile=str(OUTSIDE)))
         self.assertIsNone(self.call("view_file_outline", AbsolutePath=str(self.root / "app.py")))
         self.assertIsNone(self.call("browser_click_element", Index=3))
         self.assertIsNone(self.call("notify_user"))
-
-    def test_agent_folders(self):
-        plan = self.artifacts / "implementation_plan.md"
-        self.assertIsNone(self.verdict("ide", "write_to_file", TargetFile=plan))
-        skill = PLUGIN / "skills" / "idea" / "SKILL.md"
-        self.assertIsNone(self.verdict("ide", "view_file", AbsolutePath=skill))
-        builtin = Path.home() / ".gemini" / "antigravity" / "builtin" / "skills" / "x" / "SKILL.md"
-        self.assertIsNone(self.verdict("app", "read_file", Path=builtin))
-        settings = Path.home() / ".gemini" / "config" / "config.json"
-        self.assertEqual(self.verdict("app", "write_file", Path=settings), "ask")
 
     def test_guard_output(self):
         def guard(**args):
