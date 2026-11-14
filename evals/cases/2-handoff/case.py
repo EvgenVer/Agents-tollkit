@@ -1,5 +1,7 @@
 """A new session picks up a half-done task and keeps the record of the finished one."""
 
+import re
+
 import fixture as f
 
 PROMPT = "Continue"
@@ -47,8 +49,10 @@ def check(workspace, run):
         "tags work": f.python_ok(workspace, TAGS_CHECK),
         "search still works": f.python_ok(workspace, SEARCH_CHECK),
         "project tests pass": f.tests_pass(workspace),
-        "T2 evidence kept": " ".join(EVIDENCE.split())
-        in " ".join(f.records(workspace).split()),
+        # A closed stage may be retold in docs/history: the command and its result must stay.
+        "T2 evidence kept": bool(re.search(
+            r"T2\b.{0,200}?unittest discover -s tests -q`?, 3 tests pass",
+            " ".join(f.records(workspace).split()))),
         "T3 ticked": f.ticked(workspace, "T3"),
         "committed": f.commits_since(workspace, base) >= 1 and f.clean_tree(workspace),
     }
