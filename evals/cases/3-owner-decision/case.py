@@ -22,7 +22,7 @@ TASKS = f.tasks_text(
 STORAGE = re.compile(r"sqlite3|json\.dump|pickle|shelve|\bopen\(|write_text|csv\.writer")
 
 # The session may answer in the owner's language of the machine it runs on.
-ASKS = re.compile(r"\?|choose|decide|which option|выберите|решите|какой вариант", re.IGNORECASE)
+ASKS = re.compile(r"\?|choose|decide|which option|выберите|выбрать|решите|какой вариант|нужно от вас|need from you", re.IGNORECASE)
 
 
 def setup(workspace, plugin):

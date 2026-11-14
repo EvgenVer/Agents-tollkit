@@ -209,7 +209,12 @@ def records(root):
 
 
 def ticked(root, task):
-    return bool(re.search(rf"^\s*[-*] \[[xX]\]\s*\**{task}\b", records(root), re.MULTILINE))
+    """True when the task is recorded as done: ticked, or no longer open in the task log
+    and named in the history of finished stages (which need not keep the checkbox)."""
+    if re.search(rf"^\s*[-*] \[[xX]\]\s*\**{task}", records(root), re.MULTILINE):
+        return True
+    still_open = re.search(rf"\[ \]\s*\**{task}", tasks(root))
+    return not still_open and bool(re.search(rf"{task}", records(root)[len(tasks(root)):]))
 
 
 def now_section(root):
