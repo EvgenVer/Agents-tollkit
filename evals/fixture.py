@@ -209,7 +209,7 @@ def records(root):
 
 
 def ticked(root, task):
-    return bool(re.search(rf"^\s*- \[[xX]\] {task}\b", records(root), re.MULTILINE))
+    return bool(re.search(rf"^\s*[-*] \[[xX]\]\s*\**{task}\b", records(root), re.MULTILINE))
 
 
 def now_section(root):

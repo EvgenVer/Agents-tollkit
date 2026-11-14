@@ -87,26 +87,16 @@ first. When it changes the architecture or the stack, go back to the `design` sk
 - Keep dependencies inside the project: Python in `.venv`, JavaScript through the
   project's package manager; never install globally. Before adding a package, check
   that it exists and is maintained.
-- Use a subagent only for broad research, a fresh review or an independent task in other
-  files, and run at most three at a time. Start it with a fresh context and a
-  self-contained brief: the goal, the files, what done looks like. Ask for a short report.
-  A subagent does only its brief: it does not edit `docs/TASKS.md`, commit, or start
-  subagents of its own. You stay responsible for the plan, `docs/TASKS.md` and the result.
-- Have a fresh subagent review code, not documents or plans: a task that changes the
-  data model, security, money or how parts communicate, before you build on it; in a
-  long stage, every three or four tasks; and each stage at its end. A fix that tests
-  cover needs no new review; after fixing findings, ask the same reviewer to check just
-  the fixes. A review gets at most two such checks; after that, fix now only what would
-  lose data or break security, and move the rest to `Technical debt`.
-
-## Technical debt
-
-Keep the code matching `docs/ARCHITECTURE.md`. At the end of each stage, have a fresh
-subagent review the stage against it: module boundaries, duplication, dead code, tests
-on critical paths, outdated or vulnerable dependencies. Fix small things as you find
-them. Record the findings, and larger risks found during the stage that do not block the
-current task, under `Technical debt` in `docs/TASKS.md` with a priority. Fix them before
-the stage is closed; keep one open only if the owner agrees.
+- A subagent gets a self-contained brief (the goal, the files, what done looks like) and
+  does only that: it does not edit `docs/TASKS.md`, commit, or start subagents of its
+  own. Run at most three at a time. You stay responsible for the plan and the result.
+- Have a reviewer with a fresh context check the code at the end of each stage, and
+  before you build on a change to the data model, security, money or how parts
+  communicate. The stage review also compares the code with `docs/ARCHITECTURE.md`:
+  module boundaries, duplication, dead code, tests on critical paths, outdated or
+  vulnerable dependencies. Fix now what breaks the requirement, loses data or weakens
+  security. Record the rest under `Technical debt` in `docs/TASKS.md` with a priority
+  and fix it before the stage is closed; keep one open only if the owner agrees.
 
 ## Long sessions
 
