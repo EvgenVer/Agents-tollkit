@@ -80,7 +80,9 @@ def main(argv=None):
     if args.action == "install":
         if os.path.lexists(copy):
             remove(copy)
-        shutil.copytree(PLUGIN, copy, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        # agents/ holds Claude Code agents: Antigravity cannot load their models and tools.
+        shutil.copytree(PLUGIN, copy,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "agents"))
         # The IDE (2.5) knows only a plugin.json at the plugin root. The checkout keeps the
         # manifest in .antigravity-plugin/, out of the way of Claude Code and Codex.
         shutil.copyfile(copy / ".antigravity-plugin" / "plugin.json", copy / "plugin.json")

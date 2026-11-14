@@ -41,6 +41,9 @@ class Install(unittest.TestCase):
             self.assertEqual((self.copy / relative).read_bytes(),
                              (PLUGIN / relative).read_bytes(), relative)
         self.assertFalse(list(self.copy.rglob("__pycache__")))
+        # Claude Code agents stay out: Antigravity rejects their models and tool lists.
+        self.assertTrue((PLUGIN / "agents" / "reviewer.md").is_file())
+        self.assertFalse((self.copy / "agents").exists())
         # The IDE reads the manifest only from the plugin root; the checkout has none there.
         self.assertEqual((self.copy / "plugin.json").read_bytes(),
                          (PLUGIN / ".antigravity-plugin" / "plugin.json").read_bytes())
