@@ -201,8 +201,15 @@ def tasks(root):
     return (root / "docs" / "TASKS.md").read_text(encoding="utf-8", errors="replace")
 
 
+def records(root):
+    """The task log with the finished stages: a closed stage moves to docs/history/."""
+    history = sorted((root / "docs" / "history").glob("*.md"))
+    return tasks(root) + "".join(path.read_text(encoding="utf-8", errors="replace")
+                                 for path in history)
+
+
 def ticked(root, task):
-    return bool(re.search(rf"^- \[[xX]\] {task}\b", tasks(root), re.MULTILINE))
+    return bool(re.search(rf"^\s*- \[[xX]\] {task}\b", records(root), re.MULTILINE))
 
 
 def now_section(root):

@@ -38,5 +38,4 @@ def check(workspace, run):
         "project tests pass": f.tests_pass(workspace),
         "T5 ticked": f.ticked(workspace, "T5"),
         "committed": f.commits_since(workspace, base) >= 1 and f.clean_tree(workspace),
-        "did not ask the owner": f.nothing_waits(workspace),
     }

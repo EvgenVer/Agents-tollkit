@@ -47,7 +47,8 @@ def check(workspace, run):
         "tags work": f.python_ok(workspace, TAGS_CHECK),
         "search still works": f.python_ok(workspace, SEARCH_CHECK),
         "project tests pass": f.tests_pass(workspace),
-        "T2 evidence kept": EVIDENCE in f.tasks(workspace),
+        "T2 evidence kept": " ".join(EVIDENCE.split())
+        in " ".join(f.records(workspace).split()),
         "T3 ticked": f.ticked(workspace, "T3"),
         "committed": f.commits_since(workspace, base) >= 1 and f.clean_tree(workspace),
     }

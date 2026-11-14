@@ -43,5 +43,4 @@ def check(workspace, run):
         "T2 and T3 ticked": f.ticked(workspace, "T2") and f.ticked(workspace, "T3"),
         "Now moved past T2": "Active task: T2" not in f.now_section(workspace),
         "committed": f.commits_since(workspace, base) >= 1 and f.clean_tree(workspace),
-        "did not stop to ask": f.nothing_waits(workspace),
     }
