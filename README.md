@@ -17,13 +17,14 @@ Toolkit v1 is preserved under the git tag `v1-legacy`.
 | `idea` skill | [skills/idea](plugins/studio/skills/idea/SKILL.md) | Sets up a new project with a script, then brainstorms the idea with you into `docs/PRODUCT.md` |
 | `design` skill | [skills/design](plugins/studio/skills/design/SKILL.md) | Technical interview: architecture, stack and libraries go to `docs/ARCHITECTURE.md` and `docs/decisions/`, stages to `docs/TASKS.md` |
 | `docs` skill | [skills/docs](plugins/studio/skills/docs/SKILL.md) | Technical documentation site: Markdown with Mermaid diagrams, code embedded from the source, hover hints for terms, dark theme |
-| Hooks | [hooks](plugins/studio/hooks/studio_hooks.py) | Restore where work stopped; block secrets and destructive commands; ask before pushing to the main branch, global installs and files outside the project; check records and docs before stopping |
+| Agents (Claude Code) | [agents](plugins/studio/agents) | `studio:reviewer` reviews a stage or a risky change on Opus with a fresh context; `studio:scout` finds things in the code on Haiku; `studio:worker` builds one specified piece on Sonnet when the agent chooses to hand it over |
+| Hooks | [hooks](plugins/studio/hooks/studio_hooks.py) | Restore where work stopped; block secrets and destructive commands; ask before pushing to the main branch; check the work record before stopping |
 
 Each project ends up with:
 
 ```text
 AGENTS.md, CLAUDE.md     rules for the agents (CLAUDE.md just imports AGENTS.md)
-.claude/settings.json    plugin and secret-file rules for Claude Code
+.claude/settings.json    plugin, secret-file rules and subagent limits for Claude Code
 .codex/config.toml       sandbox, context and subagent limits for Codex
 zensical.toml            documentation site settings
 docs/                    PRODUCT, ARCHITECTURE, decisions/, components/, flows/, data,
@@ -90,33 +91,46 @@ The agent works without asking for each step. What stops it is deterministic:
 |---|---|---|---|
 | Operating-system sandbox | none on native Windows (only macOS, Linux, WSL2) | `.codex/config.toml`: `workspace-write` sandbox, network on, approval on request; applied once you trust the project. On Windows it works only after the sandbox setup below | not set up by studio; Antigravity's own permission settings apply |
 | Hooks: denied | reading secrets (`.env`, keys, credential files), force-push, `git reset --hard`, `git clean -f`, discarding all changes, recursive deletes outside the project or of the project, disk commands | the same | the same |
-| Hooks: owner asked | `git push` to `main`, `master` or the remote's default branch, or to branches the command does not name (`--all`, `--tags`, deletions, a variable); pushing a working branch is allowed; global installs (`npm -g`, `pip` outside `.venv`, `winget`, `cargo install`, …), deleting files outside the project, reading or writing files outside the project (file tools, `cp`/`mv`, `Set-Content`/`Out-File`, `>` redirects); changing the project's `.claude/settings.json` or `settings.local.json` | the same actions are denied with an explanation, because Codex hooks cannot ask yet; file reads through the shell are not checked | denied with an explanation as in Codex, because Antigravity shows no prompt when a hook asks; the agent's own folders under `~/.gemini` stay readable and its plan artifacts writable |
-| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md or Now, empty project commands; before stopping, each reminder once per session: record evidence for work changed or committed in the session, update Now, check pages that mention changed or deleted files | the same; subagents are not sent back | the same; before stopping, the agent is sent back once per turn |
+| Hooks: owner asked | `git push` to `main`, `master` or the remote's default branch, or to branches the command does not name (`--all`, `--tags`, deletions, a variable); pushing a working branch is allowed | denied with an explanation, because Codex hooks cannot ask yet | denied with an explanation, because Antigravity shows no prompt when a hook asks |
+| Reminders | session start: where work stopped, uncommitted changes, a long TASKS.md or Now, empty project commands; before stopping, each reminder once per session: record evidence for work changed or committed in the session, update Now | the same; subagents are not sent back | the same; before stopping, the agent is sent back once per turn |
+
+Since 3.6.0 the hooks stop only what cannot be undone. They no longer ask about reading or
+writing files outside the project, deleting single files there, global installs or changes
+to the project's Claude Code settings: `AGENTS.md` tells the agent to ask you first, and the
+tool's own permission mode or sandbox is what enforces it. Where there is no sandbox —
+Claude Code on native Windows, and Antigravity as studio leaves it — nothing but the rules
+stands between the agent and a file outside the project. Commit often, and keep backups of
+important folders outside your projects.
 
 Hooks are a safety net, not a wall: a script the agent writes can still do what the hooks
 cannot see. Quoted text and the scripts and messages passed in here-documents count as
-text: a `>` there is no redirect, and such a script is denied only when it names a secret
-file that exists. In a Python script only a string of its own counts, such as `open('.env')`
-or `ROOT / '.env'`: the name inside code the script writes into a file, or in a comment,
-does not. On Windows a `/tmp` path counts as the temporary folder, as in Git Bash.
-Notes the Claude desktop app keeps for a side session (`Claude-Data/.../side-session-notes`)
-count as the agent's own folder.
-A variable set to a plain value earlier in the same command, such as `W="..."; cd "$W"`,
-counts as that value. The project is the repository Claude Code started in, so a clone
-kept inside the project does not hide the rest of it.
+text, and such a script is denied only when it names a secret file that exists. In a Python
+script only a string of its own counts, such as `open('.env')` or `ROOT / '.env'`: the name
+inside code the script writes into a file, or in a comment, does not. On Windows a `/tmp`
+path counts as the temporary folder, as in Git Bash. A variable set to a plain value
+earlier in the same command, such as `W="..."; cd "$W"`, counts as that value. The project
+is the repository Claude Code started in, so a clone kept inside the project does not hide
+the rest of it.
 
 Folders the agent works in beside the project, such as the working folder of a program it
 drives or a folder for test installs, go under `permissions.additionalDirectories` in the
 project's `.claude/settings.local.json` (or `settings.json`). Claude Code then stops asking
-about them, and the hooks treat them like the temporary folder in all three tools: the agent
-reads, writes and deletes files there, but never deletes such a folder or everything in it.
-Commit often, and keep backups of important folders outside your projects.
+about them, and the hooks treat them like the temporary folder in all three tools: the
+agent may delete folders inside them, but never such a folder itself or everything in it.
 
 In Antigravity a hook that fails would block every tool, so the studio hooks let the
 action through when they fail, and they do nothing at all when `python` is missing from
 PATH. They were checked on Windows only.
 
-In Claude Code use the auto permission mode for long sessions. In Codex on Windows, turn
+In Claude Code use the auto permission mode for long sessions, with `high` effort for a
+long unattended run and `medium` for work you follow. The session's model plans, writes
+most of the code and keeps the records; the reviewer always runs on Opus and the scout on
+Haiku. The agent hands code to `studio:worker` only when it judges that worth it: in a
+replay of two real tasks with Sonnet as the session model, making the worker write all
+the code cost about 60% more and took longer, with the same test results. On a stronger
+session model the worker moves most of the written code to Sonnet prices; to try that,
+ask for it in your request ("have studio:worker write the code"). Claude Code's own
+`opusplan` model setting is a simpler alternative: Opus plans, Sonnet builds. In Codex on Windows, turn
 on its sandbox once: accept the sandbox setup Codex offers, or set `[windows] sandbox =
 "elevated"` in `~/.codex/config.toml` (the setup needs administrator approval). Inside
 the sandbox `.git` is read-only, so Codex runs `git init`, `git add` and `git commit`
@@ -140,15 +154,14 @@ Codex resends the whole conversation with every request, so a long session uses 
 fast. The project's `.codex/config.toml` compacts the conversation at 200,000 tokens and
 runs at most four agents at once, with no subagents of subagents. Start a new session for
 each stage, since `docs/TASKS.md` keeps where work stands, and choose medium reasoning
-effort in `/model` for routine building. The rules in `AGENTS.md` keep the rest down: the
-agent runs only the tests that cover a change when the full run takes more than ten
-minutes, and asks for at most two checks of a review's fixes.
+effort in `/model` for routine building.
 
 Codex also gets rules of its own from the session-start hook, which neither Claude Code nor
 Antigravity receives. The agent waits for a long command instead of checking on it, so it
 stays silent for up to five minutes at a time. It puts related commands in one call, builds
-the documentation only when that changed, and has commits reviewed in groups of three or
-four. It writes down what closes a task before working on it, splits a task still open
+the documentation only when that changed, runs only the tests that cover a change when the
+full run takes more than ten minutes, has commits reviewed in groups of three or four, and
+asks for at most two checks of a review's fixes. It writes down what closes a task before working on it, splits a task still open
 after four commits, and does not end its turn while the task is open and nothing blocks it.
 These rules work only while the Codex hooks are trusted in `/hooks`. Any change to the
 plugin's files, even under the same version, stops all its hooks until you trust them again,
@@ -160,7 +173,18 @@ when you update that file, and these settings when you copy them from
 [the template](plugins/studio/skills/idea/project/codex-config.toml) to its
 `.codex/config.toml`, keeping the top-level ones above the first `[table]`.
 
-## Move an existing project to this version
+## Update a project set up with an earlier studio version
+
+The plugin updates itself; the files it copied into the project do not. Paste this into a
+session in the project:
+
+> Update this project's studio files. Replace AGENTS.md with the template from the studio
+> `idea` skill (`project/AGENTS.md`), keeping this project's `Project rules` and `Project
+> commands` sections as they are. Add the `env` block from the skill's
+> `project/claude-settings.json` to `.claude/settings.json`, keeping the settings already
+> there. Change nothing else, show me the diff and commit.
+
+## Move a project without studio, or from toolkit v1
 
 Install the plugin, open the project in Claude Code, Codex or Antigravity and paste the
 text below. The agent moves the project on a separate branch, `studio-migration`, checks
@@ -254,7 +278,23 @@ claude plugin validate .
 ```
 
 ```bash
-agy plugin validate plugins/studio
+agy plugin validate "$HOME/.gemini/config/plugins/studio"
+```
+
+Antigravity is validated on the installed copy: the checkout also holds `agents/`, which
+are Claude Code agents that Antigravity cannot load, and `scripts/antigravity.py` leaves
+them out of the copy.
+
+The rules are checked on live sessions, not only by unit tests. `evals/run.py` runs six
+small scenarios in a throwaway project through `claude -p` (continue a stage, pick up
+half-done work, a decision that is the owner's, a decision that is the agent's, a bug
+fix, a dangerous request) and scores what the agent left behind; `evals/replay.py` gives
+the agent a task a real project already finished and runs that project's own tests on the
+result. Both take `--plugin` with a copy of the plugin to compare versions, and both spend
+your Claude Code limits:
+
+```bash
+python evals/run.py --label check --runs 1
 ```
 
 Raise `version` in `plugins/studio/.claude-plugin/plugin.json`,
