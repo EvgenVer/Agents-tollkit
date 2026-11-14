@@ -107,33 +107,38 @@ class Run:
         }
 
 
-def run_one(case, folder, plugin, args, number, out):
-    work = Path(tempfile.gettempdir()) / "studio-evals" / args.label / f"{folder.name}-{number}"
-    shutil.rmtree(work, ignore_errors=True)
-    workspace = work / "ws"
-    workspace.mkdir(parents=True)
-    case.setup(workspace, plugin)
+def session(workspace, prompt, plugin, model, effort, max_turns=80, timeout=1800):
+    """Run one headless session in the workspace: (Run, output lines, stderr tail)."""
     command = [shutil.which("claude") or "claude", "-p",
-               "--model", getattr(case, "MODEL", None) or args.model,
-               "--effort", args.effort,
+               "--model", model, "--effort", effort,
                "--plugin-dir", str(plugin),
                "--settings", SETTINGS,
                "--setting-sources", "project,local",
                "--output-format", "stream-json", "--verbose",
-               "--max-turns", str(getattr(case, "MAX_TURNS", 80)),
+               "--max-turns", str(max_turns),
                "--allowedTools", *TOOLS]
-    started = time.time()
     try:
-        done = subprocess.run(command, cwd=workspace, input=case.PROMPT, capture_output=True,
-                              text=True, encoding="utf-8", errors="replace",
-                              timeout=getattr(case, "TIMEOUT", 1800))
+        done = subprocess.run(command, cwd=workspace, input=prompt, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=timeout)
         lines, stderr = done.stdout.splitlines(), done.stderr[-2000:]
     except subprocess.TimeoutExpired as expired:
         output = expired.stdout or ""
         if isinstance(output, bytes):
             output = output.decode("utf-8", errors="replace")
         lines, stderr = output.splitlines(), "timed out"
-    run = Run(lines)
+    return Run(lines), lines, stderr
+
+
+def run_one(case, folder, plugin, args, number, out):
+    work = Path(tempfile.gettempdir()) / "studio-evals" / args.label / f"{folder.name}-{number}"
+    shutil.rmtree(work, ignore_errors=True)
+    workspace = work / "ws"
+    workspace.mkdir(parents=True)
+    case.setup(workspace, plugin)
+    started = time.time()
+    run, lines, stderr = session(workspace, case.PROMPT, plugin,
+                                 getattr(case, "MODEL", None) or args.model, args.effort,
+                                 getattr(case, "MAX_TURNS", 80), getattr(case, "TIMEOUT", 1800))
     try:
         checks = case.check(workspace, run)
     except Exception as error:  # a broken check is a failed run, not a crashed suite
