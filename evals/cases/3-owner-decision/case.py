@@ -21,6 +21,9 @@ TASKS = f.tasks_text(
 """)
 STORAGE = re.compile(r"sqlite3|json\.dump|pickle|shelve|\bopen\(|write_text|csv\.writer")
 
+# The session may answer in the owner's language of the machine it runs on.
+ASKS = re.compile(r"\?|choose|decide|which option|выберите|решите|какой вариант", re.IGNORECASE)
+
 
 def setup(workspace, plugin):
     f.build(workspace, plugin, TASKS)
@@ -33,5 +36,5 @@ def check(workspace, run):
         "no storage was built": not STORAGE.search(code),
         "T4 stays open": not f.ticked(workspace, "T4"),
         "question recorded in Now": not f.nothing_waits(workspace),
-        "final message asks": "?" in run.final,
+        "final message asks": bool(ASKS.search(run.final)),
     }
