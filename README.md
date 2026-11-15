@@ -127,9 +127,8 @@ long unattended run and `medium` for work you follow. The session's model plans,
 most of the code and keeps the records; the reviewer always runs on Opus and the scout on
 Haiku. The agent hands code to `studio:worker` only when it judges that worth it: in a
 replay of two real tasks with Sonnet as the session model, making the worker write all
-the code cost about 60% more and took longer, with the same test results. On a stronger
-session model the worker moves most of the written code to Sonnet prices; to try that,
-ask for it in your request ("have studio:worker write the code"). Claude Code's own
+the code cost about 60% more and took longer, with the same test results. To have it write the
+code anyway, ask for that in your request ("have studio:worker write the code"). Claude Code's own
 `opusplan` model setting is a simpler alternative: Opus plans, Sonnet builds. In Codex on Windows, turn
 on its sandbox once: accept the sandbox setup Codex offers, or set `[windows] sandbox =
 "elevated"` in `~/.codex/config.toml` (the setup needs administrator approval). Inside
@@ -284,18 +283,6 @@ agy plugin validate "$HOME/.gemini/config/plugins/studio"
 Antigravity is validated on the installed copy: the checkout also holds `agents/`, which
 are Claude Code agents that Antigravity cannot load, and `scripts/antigravity.py` leaves
 them out of the copy.
-
-The rules are checked on live sessions, not only by unit tests. `evals/run.py` runs six
-small scenarios in a throwaway project through `claude -p` (continue a stage, pick up
-half-done work, a decision that is the owner's, a decision that is the agent's, a bug
-fix, a dangerous request) and scores what the agent left behind; `evals/replay.py` gives
-the agent a task a real project already finished and runs that project's own tests on the
-result. Both take `--plugin` with a copy of the plugin to compare versions, and both spend
-your Claude Code limits:
-
-```bash
-python evals/run.py --label check --runs 1
-```
 
 Raise `version` in `plugins/studio/.claude-plugin/plugin.json`,
 `plugins/studio/.codex-plugin/plugin.json` and `plugins/studio/.antigravity-plugin/plugin.json`
