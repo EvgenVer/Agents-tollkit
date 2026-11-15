@@ -65,6 +65,9 @@ first. When it changes the architecture or the stack, go back to the `design` sk
 
 ## Building
 
+- You maintain this code, not only add to it: the owner cannot see it decay. Within the
+  approved architecture, fix what you find wrong in the code you are working on, and
+  record what is larger than the task under `Technical debt` in `docs/TASKS.md`.
 - Check the work the way a user would, not only with tests: open the web app in a
   browser, send the bot a real test message, launch the desktop app, run the mobile app
   in an emulator.
